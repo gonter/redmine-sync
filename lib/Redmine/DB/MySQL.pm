@@ -6,6 +6,7 @@ use parent 'Redmine::DB';
 
 # use Redmine::DB::Project;
 
+my $show_query= 0;
 my $show_fetched= 0;
 
 sub connect
@@ -50,14 +51,20 @@ sub get_all_x
   my @v= ();
   if (defined ($where))
   {
-    print "where: ", main::Dumper ($where);
+    print "where: ", main::Dumper ($where) if ($show_query);
     $ss .= ' WHERE ' . shift (@$where);
     @v= @$where;
   }
-  print "ss=[$ss]\n";
+
+  if ($show_query)
+  {
+    print "ss=[$ss]";
+    print ' vars: ', join (',', @v) if (@v);
+    print "\n";
+  }
 
   my $sth= $dbh->prepare($ss) or print $dbh->errstr;
-  print "sth=[$sth]\n";
+  # print "sth=[$sth]\n";
   $sth->execute(@v);
 
   my $t= $self->table($table);
@@ -94,19 +101,20 @@ sub get_project_members
 
 =cut
 
-sub get_members
+sub pcx_members
 {
   my $self= shift;
   my $proj_id= shift;
 
-  my $res= $self->table('x_sync');
+  my $res= $self->table('pcx');
 
   my $proj=    $self->get_all_x ('projects', [ 'id=?',         $proj_id ]);
   my $members= $self->get_all_x ('members',  [ 'project_id=?', $proj_id ]);
+
   $res->{'project'}= $proj;
   $res->{'members'}= $members;
 
-  print "proj: ", main::Dumper($proj);
+  # print "proj: ", main::Dumper($proj);
 
   # --------------------------------------------------------------------
   # check for members and users
@@ -125,7 +133,7 @@ sub get_members
 
   if (@missing_users)
   {
-    print "missing users: [", join (' ', @missing_users), "]\n";
+    # print "missing users: [", join (' ', @missing_users), "]\n";
     my $in= 'id IN ('. join(',', map { '?' } @missing_users) . ')';
     # $show_fetched= 1;
     $self->get_all_x ('users', [ $in, @missing_users ]),
@@ -134,12 +142,12 @@ sub get_members
   $res;
 }
 
-sub get_wiki
+sub pcx_wiki
 {
   my $self= shift;
   my $proj_id= shift;
 
-  my $res= $self->table('x_sync');
+  my $res= $self->table('pcx');
 
   # --------------------------------------------------------------------
   # check for wiki stuff
@@ -159,7 +167,8 @@ sub get_wiki
     foreach my $wiki_id (@wiki_ids)
     {
       my $wiki_pages= $self->get_all_x ('wiki_pages', [ 'wiki_id=?', $proj_id ]);
-      print "wiki_id=[$wiki_id] wiki_pages: ", main::Dumper ($wiki_pages);
+      $res->{'wiki_pages'}->{$wiki_id}= $wiki_pages;
+      # print "wiki_id=[$wiki_id] wiki_pages: ", main::Dumper ($wiki_pages);
     }
   }
 

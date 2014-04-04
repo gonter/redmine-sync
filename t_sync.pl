@@ -32,6 +32,8 @@ use Redmine::DB::MySQL;
 
 # yeah, this should be in a config file, but 
 my $setup_file;
+
+# this structure ($setup) resembles something like a "context"
 my $setup=
 {
   'src' =>
@@ -87,13 +89,13 @@ sub usage
   exit (0);
 }
 
-if ($op_mode eq 'usage') { usage(); }
+   if ($op_mode eq 'usage') { usage(); }
 elsif ($op_mode eq 'prep')
 {
   my $dst= read_configs($setup, 'dst');
   prepare_sync_table ($dst);
 }
-elsif ($op_mode eq 'sdp')
+elsif ($op_mode eq 'sdp') # sdp: show destination intance's projects
 {
   my $dst= read_configs($setup, 'dst');
 
@@ -104,14 +106,18 @@ elsif ($op_mode eq 'sync')
 {
   my $src= read_configs($setup, 'src');
   my $dst= read_configs($setup, 'dst');
+  # my $x_u= $src->get_all_users();
 
   # print "setup: ", Dumper ($setup);
 
   foreach my $sp (@{$setup->{'sync_projects'}})
   {
+    my $proj_id= $sp->{'src_proj'};
     print "sp: ", Dumper ($sp);
-    my $sx= $src->get_project_members ($sp->{'src_proj'});
-    print "sx: ", Dumper ($sx);
+    $src->pcx_members ($proj_id);
+    my $pcx= $src->pcx_wiki ($proj_id);
+    print "pcx: ", Dumper ($pcx);
+    # print "src: ", Dumper ($src);
   }
 }
 elsif ($op_mode eq 'diag')
@@ -127,7 +133,7 @@ elsif ($op_mode eq 'diag')
 # print "src_usr: ", Dumper ($src_usr);
 # print "src: ", Dumper ($src);
 
-# my $src_members= $src->get_project_members (170);
+# my $src_members= $src->get_project_members (... some project id ...);
 # print "src_members: ", Dumper ($src_members);
 
 
@@ -182,6 +188,8 @@ CREATE TABLE `syncs`
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
 EOX
+
+  # NOTE: for some reason, this can't be sent to the database, maybe/probably I'm missing something...
 
   print "perform this on the database\n", "--- 8< ---\n", $ss, "--- >8 ---\n";
 }
