@@ -1,8 +1,30 @@
 
+=head1 NAME
+
+  Redmine::DB::CTX;
+
+=head1 DESCRIPTION
+
+This implements what I call a "Redmine synchronisation context".
+It has a synchronisation context id (sync_conext_id), a source (src)
+and a destination (dst) which resemble database connections.
+
+=head1 SYNOPSIS
+
+  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'src' => $src, 'dst' => $dst);
+
+=cut
+
 package Redmine::DB::CTX;
 
 use strict;
 use parent 'Redmine::DB';
+
+=head2 $context->sync_project ($source_project_id, $destination_project_id)
+
+sync one project
+
+=cut
 
 sub sync_project
 {
@@ -13,21 +35,54 @@ sub sync_project
   $ctx->sync_project_users ($sp_id, $dp_id);
 }
 
-=head2 $context->translate ($table_name, $src_id)
+=head1 TRANSLATION
+
+Possibly the most important aspect of a synchronisation job is the
+translation of record IDs.  This is done using a translation table called
+`syncs` which is stored in the destinatios (dst) database.
+
+The "CREATE TABLE" statements can be found in the source (here) or retrieved via
+
+  my ($ddl_sync_contexts, $ddl_syncs)= Redmine::DB::CTX::get_DDL();
 
 =cut
 
-sub translate
+  my $TABLE_sync_contexts= <<'EOX';
+CREATE TABLE `sync_contexts`
+(
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) DEFAULT NULL,
+  `description` longtext DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+EOX
+  
+  my $TABLE_syncs= <<'EOX';
+CREATE TABLE `syncs`
+(
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `sync_context_id` int(11) DEFAULT NULL,
+  `table_name` varchar(255) DEFAULT NULL,
+  `src_id` int(11) DEFAULT NULL,
+  `dst_id` int(11) DEFAULT NULL,
+  `sync_date` datetime DEFAULT NULL,
+  `status` int(4) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+EOX
+
+sub get_DDL { return ($TABLE_sync_contexts, $TABLE_syncs); }
+
+=head2 $context->init_translation()
+
+Read the known translation table for the give synchronisation context
+and keep it around.
+
+=cut
+
+sub init_translation
 {
   my $ctx= shift;
-  my $table_name= shift;
-  my $src_id= shift;
-
-  unless (defined ($src_id))
-  {
-    print "TRANSLATE: table_name=[$table_name] src_id=[undef] tlt=[undef]\n";
-    return undef;
-  }
 
   # fetch all known translations, they are stored in the destionation's database
   my $t;
@@ -45,6 +100,29 @@ sub translate
     }
   }
 
+  return $t;
+}
+
+=head2 $context->translate ($table_name, $src_id)
+
+translate a table's id.  Takes the source's id and returns the
+destination's id, if known or undef otherwise.
+
+=cut
+
+sub translate
+{
+  my $ctx= shift;
+  my $table_name= shift;
+  my $src_id= shift;
+
+  unless (defined ($src_id))
+  {
+    print "TRANSLATE: table_name=[$table_name] src_id=[undef] tlt=[undef]\n";
+    return undef;
+  }
+
+  my $t= $ctx->init_translation();
   if (exists ($t->{$table_name}->{$src_id}))
   {
     my $x= $t->{$table_name}->{$src_id};
@@ -55,24 +133,55 @@ sub translate
   return undef;
 }
 
-sub store_translate
+=head2 $ctx->store_translation ($table_name, $src_id, $dst_id)
+
+Update translation table in the database and in the cache.
+
+=cut
+
+sub store_translation
 {
   my $ctx= shift;
   my $table_name= shift;
   my $src_id= shift;
   my $dst_id= shift;
 
+  my $t= $ctx->init_translation();
+
   my $dbh= $ctx->{'dst'}->connect();
   return undef unless (defined ($dbh));
 
-  my $ssi= "INSERT INTO syncs (sync_context_id, table_name, src_id, dst_id, sync_date, status) VALUES (?,?,?,?,now(),2)";
-  print "ssi=[$ssi]\n";
-  my $sth= $dbh->prepare($ssi);
-  my @vals= ($ctx->{'ctx_id'}, $table_name, $src_id, $dst_id);
-  print "vals: ", join (',', @vals), "\n";
-  $sth->execute(@vals);
-  $sth->finish();
+  # TODO: maybe we need to check if (sync_context_id, table_name, src_id)
+  # are already present in the database.  Then we should update the
+  # record!
+
+  my $ssi= "INSERT INTO syncs (sync_context_id, table_name,
+  src_id, dst_id, sync_date, status) VALUES (?,?,?,?,now(),2)";
+  print "ssi=[$ssi]\n"; my $sth= $dbh->prepare($ssi); my @vals=
+  ($ctx->{'ctx_id'}, $table_name, $src_id, $dst_id); print "vals: ",
+  join (',', @vals), "\n"; $sth->execute(@vals); $sth->finish();
+
+  $t->{$table_name}->{$src_id}= [ $dst_id, undef, 2 ];
 }
+
+=head1 USERS
+
+User-related tables are:
+
+  (handled)
+    users
+    members
+    member_roles
+
+ (not yet handled)
+    watchers (TODO: this also points to contents (tickets, wiki_pages, etc.), so this must wait)
+    user_preferences
+
+=head2 $context->sync_project_users ($source_project_id, $destination_project_id)
+
+Synchronize the users and related tables.
+
+=cut
 
 sub sync_project_users
 {
@@ -118,7 +227,7 @@ sub sync_project_users
       };
 
       $d_member_id= $dst->insert ('members', $d_member);
-      $ctx->store_translate('members', $s_member_id, $d_member_id);
+      $ctx->store_translation('members', $s_member_id, $d_member_id);
     }
   }
 
@@ -200,7 +309,7 @@ inherited_from points back to member_roles.id and that record might not be synce
     print "new member_role record: ", main::Dumper (\%d_mr);
 
     $d_mr_id= $ctx->{'dst'}->insert ('member_roles', \%d_mr);
-    $ctx->store_translate('member_roles', $s_mr_id, $d_mr_id);
+    $ctx->store_translation('member_roles', $s_mr_id, $d_mr_id);
   }
 
 }
@@ -219,7 +328,7 @@ sub sync_role
   delete ($d_role{'id'});
 
   my $d_role_id= $ctx->{'dst'}->insert ('roles', \%d_role);
-  $ctx->store_translate('roles', $s_role_id, $d_role_id);
+  $ctx->store_translation('roles', $s_role_id, $d_role_id);
 
   $d_role_id;
 }
@@ -249,7 +358,7 @@ sub sync_user
       print "cloned_user: ", main::Dumper ($d_user);
 
       $d_user_id= $ctx->{'dst'}->insert ('users', $d_user);
-      $ctx->store_translate('users', $s_user_id, $d_user_id);
+      $ctx->store_translation('users', $s_user_id, $d_user_id);
     }
 
   $d_user_id;
@@ -283,4 +392,14 @@ sync wiki
 }
 
 1;
+
+__END__
+
+=head1 TODOs
+
+=head2 statistics
+
+  We need counters about unchanged, new and updated records.  Deleted records may also be necessary.
+
+=end
 

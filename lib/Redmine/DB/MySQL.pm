@@ -9,6 +9,10 @@ use parent 'Redmine::DB';
 my $show_query= 0;
 my $show_fetched= 0;
 
+sub show_fetched { shift; $show_fetched= shift; }
+sub show_query { shift; $show_query= shift; }
+sub verbose { shift; $show_fetched= $show_query= shift; }
+
 sub connect
 {
   my $self= shift;
@@ -46,12 +50,12 @@ sub get_all_x
   # my $project= new Redmine::DB::Project (%par);
   # print "project: ", main::Dumper ($project);
 
-  my $ss = qq/SELECT * FROM $table/;
+  my $ss= "SELECT * FROM $table";
 
   my @v= ();
   if (defined ($where))
   {
-    print "where: ", main::Dumper ($where) if ($show_query);
+    # print "where: ", main::Dumper ($where) if ($show_query);
     $ss .= ' WHERE ' . shift (@$where);
     @v= @$where;
   }
@@ -78,6 +82,53 @@ sub get_all_x
   $t;
 }
 
+sub insert
+{
+  my $self= shift;
+  my $table= shift;
+  my $record= shift;
+
+  my $dbh= $self->connect();
+  return undef unless (defined ($dbh));
+
+  my (@vars, @vals);
+  foreach my $an (keys %$record)
+  {
+    push (@vars, $an);
+    push (@vals, $record->{$an});
+  }
+
+  my $ssi= "INSERT INTO `$table` (". join (',', @vars) .") VALUES (" . join(',', map { '?' } @vars) . ")";
+  print "ssi=[$ssi]\n";
+  print "vals: ", join (',', @vals), "\n";
+  my $sth= $dbh->prepare($ssi);
+  $sth->execute(@vals);
+  print "ERROR: ", $dbh->errstr() if ($dbh->err);
+  $sth->finish();
+
+  return $record->{'id'} if (defined ($record->{'id'})); # id attribute was set already
+
+  my $ssq= "SELECT LAST_INSERT_ID()";
+  print "ssq=[$ssq]\n";
+  $sth= $dbh->prepare($ssq);
+  $sth->execute();
+  print "ERROR: ", $dbh->errstr() if ($dbh->err);
+  my ($id)= $sth->fetchrow_array();
+  print "INSERT: id=[$id]\n";
+
+  $id;
+}
+
+sub mysql
+{
+  my $self= shift;
+  print "self: ", main::Dumper ($self);
+
+  my @cmd= ('mysql', '-h', $self->{'host'}, '-u', $self->{'username'}, $self->{'database'}, '--password='.$self->{'password'});
+  print ">> cmd=[", join (' ', @cmd), "]\n";
+  system (@cmd);
+}
+
 =head1 REDMINE STUFF
 
 before that, this might be usable for other Rails applications
@@ -88,6 +139,26 @@ TODO: factor out...
 
 sub get_all_projects { shift->get_all_x ('projects'); }
 sub get_all_users    { shift->get_all_x ('users'); }
+
+sub get_user
+{
+  my $self= shift;
+  my $an= shift;
+  my $av= shift;
+
+  my $res= $self->get_all_x ('users', [ $an.'=?', $av ]);
+}
+
+sub get_users
+{
+  my $self= shift;
+  my $an= shift;
+
+  # print "missing users: [", join (' ', @missing_users), "]\n";
+  my $in= $an . ' IN ('. join(',', map { '?' } @_) . ')';
+  $show_query= $show_fetched= 1;
+  $self->get_all_x ('users', [ $in, @_ ]),
+}
 
 sub get_project_members
 {
@@ -131,13 +202,7 @@ sub pcx_members
     # last if (@missing_users > 3);
   }
 
-  if (@missing_users)
-  {
-    # print "missing users: [", join (' ', @missing_users), "]\n";
-    my $in= 'id IN ('. join(',', map { '?' } @missing_users) . ')';
-    # $show_fetched= 1;
-    $self->get_all_x ('users', [ $in, @missing_users ]),
-  }
+  $res->{'users'}= $self->get_users ('id', @missing_users) if (@missing_users);
 
   $res;
 }

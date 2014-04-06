@@ -28,6 +28,7 @@ use Data::Dumper;
 $Data::Dumper::Indent= 1;
 
 use Redmine::DB::MySQL;
+use Redmine::DB::CTX;
 # use Redmine::DB::Project; nothing here yet ...
 
 # yeah, this should be in a config file, but 
@@ -46,18 +47,24 @@ my $setup=
     'config' => '/home/gg/etc/dst/database.yml',
     'db' => 'production',
   },
+  'sync_context_id' => 1,
+  'syncs' =>
+  [
+    # { 'table' => 'projects', 'src_id' => 170, 'dst_id' => 1 }
+    { 'table' => 'auth_sources', 'src_id' => 1, 'dst_id' => 1, }
+  ],
   'sync_projects' =>
   [
     {
       'src_proj' => 170,
-      'dst_proj' => 1,
+      'dst_proj' => 2, # we could try to retrieve a translation here
     }
   ]
 };
 
 my @parameters= ();
 my $op_mode= 'usage';
-my %op_modes= map { $_ => 1 } qw(sync sdp prep);
+my %op_modes= map { $_ => 1 } qw(sync sdp prep auth mysql user syncuser);
 
 while (my $arg= shift (@ARGV))
 {
@@ -102,22 +109,69 @@ elsif ($op_mode eq 'sdp') # sdp: show destination intance's projects
   my $dst_proj= $dst->get_all_projects();
   print "dst_proj: ", Dumper ($dst_proj);
 }
+elsif ($op_mode eq 'mysql')
+{
+  my $target= shift (@parameters);
+  usage() unless (defined ($target));
+  my $env= shift (@parameters) || 'production';
+  my $cfg= read_configs($setup, $target);
+  $cfg->mysql();
+}
+elsif ($op_mode eq 'auth')
+{
+  my $src= read_configs($setup, 'src');
+  my $dst= read_configs($setup, 'dst');
+
+  $src->show_fetched (1);
+  $src->get_all_x ('auth_sources');
+  $dst->get_all_x ('auth_sources');
+}
+elsif ($op_mode eq 'user')
+{
+  my $target= shift (@parameters);
+  usage() unless (defined ($target));
+  my $an= shift (@parameters);
+  usage() unless (defined ($an));
+  my $cfg= read_configs($setup, $target);
+
+  foreach my $av (@parameters)
+  {
+    my $user= $cfg->get_user ($an, $av);
+    print "user: ", Dumper ($user);
+  }
+
+}
+elsif ($op_mode eq 'syncuser')
+{
+  usage() unless (@parameters);
+
+  my $src= read_configs($setup, 'src');
+  my $dst= read_configs($setup, 'dst');
+  # my $x_u= $src->get_all_users();
+
+  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'src' => $src, 'dst' => $dst);
+  my $res= $src->get_users ('login', @parameters);
+  print "res: ", Dumper ($res);
+  foreach my $s_user_id (keys %$res)
+  {
+    $ctx->sync_user ($s_user_id, $res->{$s_user_id});
+  }
+}
 elsif ($op_mode eq 'sync')
 {
   my $src= read_configs($setup, 'src');
   my $dst= read_configs($setup, 'dst');
   # my $x_u= $src->get_all_users();
 
+  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'src' => $src, 'dst' => $dst);
+
   # print "setup: ", Dumper ($setup);
 
   foreach my $sp (@{$setup->{'sync_projects'}})
   {
-    my $proj_id= $sp->{'src_proj'};
     print "sp: ", Dumper ($sp);
-    $src->pcx_members ($proj_id);
-    my $pcx= $src->pcx_wiki ($proj_id);
-    print "pcx: ", Dumper ($pcx);
-    # print "src: ", Dumper ($src);
+
+    $ctx->sync_project ($sp->{'src_proj'}, $sp->{'dst_proj'});
   }
 }
 elsif ($op_mode eq 'diag')
@@ -151,14 +205,14 @@ sub read_configs
   my $stp= shift;
   my $s= shift;
 
-    my $ss= $stp->{$s};
+  my $ss= $stp->{$s};
 
-    my ($yml, $db)= map { $ss->{$_} } qw(config db);
+  my ($yml, $db)= map { $ss->{$_} } qw(config db);
 
-    print "s=[$s] yml=[$yml] db=[$db]\n";
-    my $x= YAML::Syck::LoadFile ($yml);
-    # $ss->{'_cfg'}=
-    my $c= $x->{$db};
+  print "s=[$s] yml=[$yml] db=[$db]\n";
+  my $x= YAML::Syck::LoadFile ($yml);
+  # $ss->{'_cfg'}=
+  my $c= $x->{$db};
 
   $c->{'adapter'}= 'mysql' if ($c->{'adapter'} eq 'mysql2');
   my $m= new Redmine::DB::MySQL (%$c);
@@ -176,20 +230,11 @@ sub prepare_sync_table
   my $dbh= $con->connect();
   print "dbh=[$dbh]\n";
 
-  my $ss= <<'EOX';
-CREATE TABLE `syncs`
-(
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `context_id` int(11) DEFAULT NULL,
-  `table` varchar(255) DEFAULT NULL,
-  `src_id` int(11) DEFAULT NULL,
-  `dst_id` int(11) DEFAULT NULL,
-  `sync_date` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
-EOX
-
+  my ($ddl_sync_contexts, $ddl_syncs)= Redmine::DB::CTX::get_DDL();
   # NOTE: for some reason, this can't be sent to the database, maybe/probably I'm missing something...
 
-  print "perform this on the database\n", "--- 8< ---\n", $ss, "--- >8 ---\n";
+  print "perform this on the database\n", "--- 8< ---\n",
+        $ddl_sync_contexts, "\n",
+        $ddl_syncs,
+        "--- >8 ---\n";
 }
