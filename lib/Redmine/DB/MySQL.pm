@@ -240,6 +240,21 @@ sub pcx_wiki
   $res;
 }
 
+sub pcx_user_preferences
+{
+  my $self= shift;
+  my $proj_id= shift;
+
+  my $res= $self->table('pcx');
+
+  # $show_query= 1;
+  my $pref= $self->get_all_x ('user_preferences', [ 'user_id in (select user_id from members where project_id=?)', $proj_id ]);
+
+  $res->{'user_preferences'}= $pref;
+
+  $res;
+}
+
 1;
 __END__
 

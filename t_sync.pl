@@ -173,6 +173,8 @@ elsif ($op_mode eq 'sync')
 
     $ctx->sync_project ($sp->{'src_proj'}, $sp->{'dst_proj'});
   }
+
+  print "\n"x3, '='x72, "\n", "Statistics:", Dumper ($ctx->{'stats'});
 }
 elsif ($op_mode eq 'diag')
 {

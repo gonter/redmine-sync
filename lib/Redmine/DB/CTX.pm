@@ -32,7 +32,8 @@ sub sync_project
   my $sp_id= shift;
   my $dp_id= shift;
 
-  $ctx->sync_project_users ($sp_id, $dp_id);
+  # $ctx->sync_project_members ($sp_id, $dp_id);
+  $ctx->sync_project_user_preferences ($sp_id, $dp_id);
 }
 
 =head1 TRANSLATION
@@ -88,6 +89,7 @@ sub init_translation
   my $t;
   unless (defined ($t= $ctx->{'tlt'}))
   {
+    print "NOTE: loading syncs\n";
     $t= $ctx->{'tlt'}= {};
     my $d= $ctx->{'dst'}->get_all_x ('syncs', [ 'sync_context_id=?', $ctx->{'ctx_id'} ] );
     # print "d: ", main::Dumper ($d);
@@ -126,7 +128,7 @@ sub translate
   if (exists ($t->{$table_name}->{$src_id}))
   {
     my $x= $t->{$table_name}->{$src_id};
-    print "TRANSLATE: table_name=[$table_name] src_id=[$src_id] tlt=[",join(',',@$x),"]\n";
+    # TODO: if verbosity ... print "TRANSLATE: table_name=[$table_name] src_id=[$src_id] tlt=[",join(',',@$x),"]\n";
     return (wantarray) ? @$x : $x->[0];
   }
 
@@ -161,7 +163,7 @@ sub store_translation
   ($ctx->{'ctx_id'}, $table_name, $src_id, $dst_id); print "vals: ",
   join (',', @vals), "\n"; $sth->execute(@vals); $sth->finish();
 
-  $t->{$table_name}->{$src_id}= [ $dst_id, undef, 2 ];
+  $t->{$table_name}->{$src_id}= [ $dst_id, 2, undef ];
 }
 
 =head1 USERS
@@ -183,13 +185,13 @@ Synchronize the users and related tables.
 
 =cut
 
-sub sync_project_users
+sub sync_project_members
 {
   my $ctx= shift;
   my $sp_id= shift;
   my $dp_id= shift;
 
-  my ($ctx_id, $src, $dst)= map { $ctx->{$_} } qw(ctx_id src dst);
+  my ($src, $dst)= map { $ctx->{$_} } qw(src dst);
 
   # pcx means something like "project context"; TODO: change that name if a better one comes up...
   my $s_pcx= $src->pcx_members ($sp_id);
@@ -199,6 +201,20 @@ sub sync_project_users
 
   my ($s_members, $s_users)= map { $s_pcx->{$_} } qw(members users);
   my ($d_members, $d_users)= map { $d_pcx->{$_} } qw(members users);
+
+=begin comment
+
+TODO: A user might be already present on the destination Redmine instance,
+this code would try to import him anyway.  We need a method to verify
+that a user is already present, maybe some kind of logic like that
+implemented in sync_project_user_preferences below.
+
+For now, the operator would have to add the translations to the syncs
+table by hand.  If users would be imported on a fresh instance, this
+would not really be an issue.
+
+=end comment
+=cut
 
   # verbose Redmine::DB::MySQL (1);
 
@@ -375,6 +391,94 @@ sub clone_user
   \%user;
 }
 
+=head2 $context->sync_project_user_preferences($source_project_id, $destination_project_id)
+
+Sync preferences of users associated with a certain project.
+
+=cut
+
+sub sync_project_user_preferences
+{
+  my $ctx= shift;
+  my $sp_id= shift;
+  my $dp_id= shift;
+
+  my ($src, $dst)= map { $ctx->{$_} } qw(src dst);
+  my $st= $ctx->stats('user_preferences');
+
+  my $s_pref= $src->get_all_x ('user_preferences', [ 'user_id in (select user_id from members where project_id=?)', $sp_id ]);
+  my $s_up= reindex($s_pref, 'user_id');
+
+  # first: retrieve a list of translated user_id values:
+  my @s_uids= keys %$s_up;
+  my %s_uids;
+  my %d_uids; # user_id on destination with link to user_id on source and later a preference record on the source
+  foreach my $s_uid (@s_uids)
+  {
+    my $d_uid= $ctx->translate ('users', $s_uid);
+    # print "s_uid=[$s_uid] -> d_uid=[$d_uid]\n";
+    $st->{'cnt'}++;
+
+    if (defined ($d_uid))
+    {
+      $s_uids{$s_uid}= $d_uid;
+      $d_uids{$d_uid}= [ $s_uid ]; # link back to the source
+    }
+    else
+    { # not yet translated, maybe this user was not yet synced!
+      # TODO: call sync method for this user
+      # for now we assume that users were already synced
+      print "ATTN: user_id on source ($s_uid) not translated; maybe the member synchronization must be rerun!\n";
+      $st->{'missing'}++;
+      push (@{$st->{'missing_uid'}}, $s_uid);
+    }
+  }
+
+  # second: see if users with the translated user_id are already on the destination and link their preferences into %d_uids
+  # print "user_id mapping: ", main::Dumper (\%s_uids);
+  my @tlt_uids= map { $s_uids{$_} } keys %s_uids;
+# verbose Redmine::DB::MySQL (1);
+  my $d_pref= $dst->get_all_x ('user_preferences', [ 'user_id in ('.join(',',map { '?' } @tlt_uids).')', @tlt_uids ]);
+  # print "translated preferences: ", main::Dumper ($d_pref);
+  foreach my $d_id (keys %$d_pref)
+  {
+    my $x= $d_pref->{$d_id};
+    $d_uids{$x->{'user_id'}}->[1]= $x;
+  }
+
+  # finally: see which users have a preferences record and store it for those who don't have one yet.
+  foreach my $d_uid (keys %d_uids)
+  {
+    my $x= $d_uids{$d_uid};
+    print '-'x72, "\n";
+    print "d_uid=[$d_uid] ", main::Dumper ($x);
+
+    if (defined ($x->[1]))
+    {
+      $st->{'unchanged'}++;
+    }
+    else
+    { # no prefs record yet, copy it
+      my %d_prefs= %{$s_up->{$x->[0]}};
+
+      print "prefs on source: ", main::Dumper (\%d_prefs);
+
+      my $s_prefs_id= delete ($d_prefs{'id'});
+      $d_prefs{'user_id'}= $d_uid;
+
+      print "save new prefs: ", main::Dumper (\%d_prefs);
+
+      my $d_prefs_id= $dst->insert ('user_preferences', \%d_prefs);
+      # NOTE: do we need the translation at all?  possibly not, but what the heck
+      $ctx->store_translation('user_preferences', $s_prefs_id, $d_prefs_id);
+
+      $st->{'copied'}++;
+    }
+  }
+
+  $st;
+}
+
 sub sync_wiki
 {
 
@@ -389,6 +493,34 @@ sync wiki
 =end comment
 =cut
 
+}
+
+=head1 INTERNAL METHODS?
+
+=cut
+
+sub stats
+{
+  my $self= shift;
+  my $what= shift;
+
+  my $t= $self->{'stats'}->{$what};
+     $t= $self->{'stats'}->{$what}= {} unless (defined ($t));
+  # print "accessing stats=[$what]: ", main::Dumper($self);
+  $t;
+}
+
+=head1 INTERNAL FUNCTIONS
+
+=cut
+
+sub reindex
+{
+  my $hash= shift;
+  my $key= shift;
+
+  my %res= map { my $x= $hash->{$_}; $x->{$key} => $x } keys %$hash;
+  \%res;
 }
 
 1;
