@@ -6,8 +6,10 @@
 =head1 DESCRIPTION
 
 This implements what I call a "Redmine synchronisation context".
-It has a synchronisation context id (sync_conext_id), a source (src)
-and a destination (dst) which resemble database connections.
+It has a synchronisation context id (sync_context_id), a source (src)
+and a destination (dst) which resemble database connections.  During
+the synchronisation, this structure picks up a lot more of transient
+information.
 
 =head1 SYNOPSIS
 
@@ -19,6 +21,8 @@ package Redmine::DB::CTX;
 
 use strict;
 use parent 'Redmine::DB';
+
+use Data::Dumper;
 
 =head2 $context->sync_project ($source_project_id, $destination_project_id)
 
@@ -33,7 +37,8 @@ sub sync_project
   my $dp_id= shift;
 
   # $ctx->sync_project_members ($sp_id, $dp_id);
-  $ctx->sync_project_user_preferences ($sp_id, $dp_id);
+  # $ctx->sync_project_user_preferences ($sp_id, $dp_id);
+  $ctx->sync_wiki ($sp_id, $dp_id);
 }
 
 =head1 TRANSLATION
@@ -92,7 +97,7 @@ sub init_translation
     print "NOTE: loading syncs\n";
     $t= $ctx->{'tlt'}= {};
     my $d= $ctx->{'dst'}->get_all_x ('syncs', [ 'sync_context_id=?', $ctx->{'ctx_id'} ] );
-    # print "d: ", main::Dumper ($d);
+    # print "d: ", Dumper ($d);
 
     foreach my $id (keys %$d)
     {
@@ -128,9 +133,11 @@ sub translate
   if (exists ($t->{$table_name}->{$src_id}))
   {
     my $x= $t->{$table_name}->{$src_id};
-    # TODO: if verbosity ... print "TRANSLATE: table_name=[$table_name] src_id=[$src_id] tlt=[",join(',',@$x),"]\n";
+    # TODO: if verbosity ...
+    print "TRANSLATE: table_name=[$table_name] src_id=[$src_id] tlt=[",join(',',@$x),"]\n";
     return (wantarray) ? @$x : $x->[0];
   }
+  print "TRANSLATE: table_name=[$table_name] src_id=[$src_id] tlt=undef\n";
 
   return undef;
 }
@@ -197,7 +204,7 @@ sub sync_project_members
   my $s_pcx= $src->pcx_members ($sp_id);
   my $d_pcx= $dst->pcx_members ($dp_id);
   # print "keys src: ", join (' ', keys %$src), "\n";
-  # print "pcx: ", main::Dumper ($pcx);
+  # print "pcx: ", Dumper ($pcx);
 
   my ($s_members, $s_users)= map { $s_pcx->{$_} } qw(members users);
   my ($d_members, $d_users)= map { $d_pcx->{$_} } qw(members users);
@@ -226,7 +233,7 @@ would not really be an issue.
     my $s_user=      $s_users->{$s_user_id};
 # next unless ($s_user->{'type'} eq 'Group');
 
-    print "s_member: ", main::Dumper ($s_member);
+    print "s_member: ", Dumper ($s_member);
     my $d_user_id= $ctx->sync_user ($s_user_id, $s_user);
 
     my ($d_member_id, $d_status, $d_sync_date)= $ctx->translate ('members', $s_member_id);
@@ -269,7 +276,7 @@ inherited_from points back to member_roles.id and that record might not be synce
   my $in= 'member_id IN ('. join(',', map { '?' } @s_member_ids) . ')';
 
   my $s_mr_hash= $src->get_all_x ('member_roles', [ $in, @s_member_ids ]);
-  # print "s_mr_hash: ", main::Dumper ($s_mr_hash);
+  # print "s_mr_hash: ", Dumper ($s_mr_hash);
   my @s_mr_ids= sort { $a <=> $b } keys %$s_mr_hash; # maybe ordering helps
   print "s_mr_ids: [", join (',', @s_mr_ids), "]\n";
   print "\n\n", '='x72, "MEMBER_ROLE processing\n", '-'x72, "\n";
@@ -277,7 +284,7 @@ inherited_from points back to member_roles.id and that record might not be synce
   {
     my $s_mr_id= shift @s_mr_ids;
     my $s_mr= $s_mr_hash->{$s_mr_id};
-    print "member_role: ", main::Dumper ($s_mr);
+    print "member_role: ", Dumper ($s_mr);
     my $d_mr_id= $ctx->translate('member_roles', $s_mr_id);
     
     if (defined ($d_mr_id))
@@ -294,7 +301,7 @@ inherited_from points back to member_roles.id and that record might not be synce
     # users can inherit their roles from a group;
     # inherited_from is that group's id from the member_roles-table
     my $s_inh_from= $s_mr->{'inherited_from'};
-    print "s_inh_from=[$s_inh_from] s_mr: ", main::Dumper ($s_mr);
+    print "s_inh_from=[$s_inh_from] s_mr: ", Dumper ($s_mr);
 
     my $d_inh_from;
     if (defined ($s_inh_from))
@@ -322,7 +329,7 @@ inherited_from points back to member_roles.id and that record might not be synce
     );
     $d_mr{'inherited_from'}= $d_inh_from if (defined ($d_inh_from));
 
-    print "new member_role record: ", main::Dumper (\%d_mr);
+    print "new member_role record: ", Dumper (\%d_mr);
 
     $d_mr_id= $ctx->{'dst'}->insert ('member_roles', \%d_mr);
     $ctx->store_translation('member_roles', $s_mr_id, $d_mr_id);
@@ -337,7 +344,7 @@ sub sync_role
 
   my $res= $ctx->{'src'}->get_all_x ('roles', [ 'id=?', $s_role_id ]);
   return undef unless (defined ($res));
-  print "sync_role: s_role_id=[$s_role_id] res: ", main::Dumper ($res);
+  print "sync_role: s_role_id=[$s_role_id] res: ", Dumper ($res);
 
   my $s_role= $res->{$s_role_id};
   my %d_role= %$s_role;
@@ -363,7 +370,7 @@ sub sync_user
     $s_user= $res->{$s_user_id};
   }
 
-    print "s_user: ", main::Dumper ($s_user);
+    print "s_user: ", Dumper ($s_user);
 
     my ($d_user_id, $d_status, $d_sync_date)= $ctx->translate ('users', $s_user_id);
     print "s_user_id=[$s_user_id] d_user_id=[$d_user_id] d_status=[$d_status] d_sync_date=[$d_sync_date]\n";
@@ -371,7 +378,7 @@ sub sync_user
     unless (defined ($d_user_id))
     {
       my $d_user= $ctx->clone_user ($s_user);
-      print "cloned_user: ", main::Dumper ($d_user);
+      print "cloned_user: ", Dumper ($d_user);
 
       $d_user_id= $ctx->{'dst'}->insert ('users', $d_user);
       $ctx->store_translation('users', $s_user_id, $d_user_id);
@@ -435,11 +442,11 @@ sub sync_project_user_preferences
   }
 
   # second: see if users with the translated user_id are already on the destination and link their preferences into %d_uids
-  # print "user_id mapping: ", main::Dumper (\%s_uids);
+  # print "user_id mapping: ", Dumper (\%s_uids);
   my @tlt_uids= map { $s_uids{$_} } keys %s_uids;
 # verbose Redmine::DB::MySQL (1);
   my $d_pref= $dst->get_all_x ('user_preferences', [ 'user_id in ('.join(',',map { '?' } @tlt_uids).')', @tlt_uids ]);
-  # print "translated preferences: ", main::Dumper ($d_pref);
+  # print "translated preferences: ", Dumper ($d_pref);
   foreach my $d_id (keys %$d_pref)
   {
     my $x= $d_pref->{$d_id};
@@ -451,7 +458,7 @@ sub sync_project_user_preferences
   {
     my $x= $d_uids{$d_uid};
     print '-'x72, "\n";
-    print "d_uid=[$d_uid] ", main::Dumper ($x);
+    print "d_uid=[$d_uid] ", Dumper ($x);
 
     if (defined ($x->[1]))
     {
@@ -461,12 +468,12 @@ sub sync_project_user_preferences
     { # no prefs record yet, copy it
       my %d_prefs= %{$s_up->{$x->[0]}};
 
-      print "prefs on source: ", main::Dumper (\%d_prefs);
+      print "prefs on source: ", Dumper (\%d_prefs);
 
       my $s_prefs_id= delete ($d_prefs{'id'});
       $d_prefs{'user_id'}= $d_uid;
 
-      print "save new prefs: ", main::Dumper (\%d_prefs);
+      print "save new prefs: ", Dumper (\%d_prefs);
 
       my $d_prefs_id= $dst->insert ('user_preferences', \%d_prefs);
       # NOTE: do we need the translation at all?  possibly not, but what the heck
@@ -481,18 +488,88 @@ sub sync_project_user_preferences
 
 sub sync_wiki
 {
+  my $ctx= shift;
+  my $sp_id= shift;
+  my $dp_id= shift;
 
-=begin comment
+  my ($src, $dst)= map { $ctx->{$_} } qw(src dst);
+  # my $st= $ctx->stats('wiki'); each table has it's own counters
 
-sync wiki
-    # my $pcx= $src->pcx_wiki ($proj_id);
+  my $s_pcx= $src->pcx_wiki($sp_id);
+  print "s_pcx: (", join (',', sort keys %$s_pcx), ")\n";
+  # print Dumper ($s_pcx); exit;
 
-    # print "pcx: ", main::Dumper ($pcx);
-    # print "src: ", main::Dumper ($src);
+  # NOTE: Let's assume that the destination does not receive pages from
+  # somewhere else (e.g. someone adding that by hand)
+  $ctx->sync_generic_table ($s_pcx, 'wikis',          [ [ 'project_id' => 'projects' ] ]);
+  $ctx->sync_generic_table ($s_pcx, 'wiki_pages',     [ [ 'wiki_id' => 'wikis' ], [ 'parent_id' => 'wiki_pages' ] ]);
+  $ctx->sync_generic_table ($s_pcx, 'wiki_redirects', [ [ 'wiki_id' => 'wikis' ] ]);
+  $ctx->sync_generic_table ($s_pcx, 'wiki_contents',  [ [ 'page_id' => 'wiki_pages' ], ['author_id' => 'users' ] ]);
+  $ctx->sync_generic_table ($s_pcx, 'wiki_content_versions',  [ [ 'wiki_content_id' => 'wiki_contents'], [ 'page_id' => 'wiki_pages' ], ['author_id' => 'users' ] ]);
+}
 
-=end comment
-=cut
+sub sync_generic_table
+{
+  my $ctx= shift;
+  my $s_pcx= shift;
+  my $table_name= shift;
+  my $tlt= shift; # list pairs
 
+  print '-'x72, "\n";
+  print "sync_generic_table: table_name=[$table_name]\n";
+  my $table= $s_pcx->{$table_name};
+  # print "table [$table_name] ", Dumper ($table); exit;
+
+  my $cnt= $ctx->stats($table_name);
+  my @s_ids= sort { $a <=> $b} keys %$table; # maybe sorting helps to bring order into an hierarchy
+  print "s_ids: ", join (',', @s_ids), "\n";
+  ITEM: while (my $s_id= shift (@s_ids))
+  {
+    my $d_id= $ctx->translate ($table_name, $s_id);
+    print "d_id=[$d_id]\n";
+    $cnt->{'processed'}++;
+
+    if (defined ($d_id))
+    {
+      $cnt->{'unchanged'}++;
+    }
+    else
+    {
+      my %data= %{$table->{$s_id}};
+      delete ($data{'id'});
+
+      # translate attributes (an) pointing to table (tn); $tlt is a list of pairs
+      TLT: foreach my $t (@$tlt)
+      {
+        my ($an, $tn)= @$t;
+        my $s_av= $data{$an};
+        next TLT unless (defined ($s_av));
+        my $d_av= $ctx->translate ($tn, $s_av);
+
+        unless (defined ($d_av))
+        {
+          if ($tn eq $table_name)
+          { # this is a self referential table, put the (yet unresolved) to the head of the queue
+            # TODO: this could lead to an endless loop!
+            unshift (@s_ids, $s_av);
+            push (@s_ids, $s_id);
+            next ITEM;
+          }
+
+          print "ERROR: translation not known for an=[$an] s_av=[$s_av] in table=[$tn]\n";
+          $cnt->{'av_tlt_missing'}++;
+          next TLT;
+        }
+        $data{$an}= $d_av;
+      }
+
+      $d_id= $ctx->{'dst'}->insert ($table_name, \%data);
+      $ctx->store_translation($table_name, $s_id, $d_id);
+      $cnt->{'added'}++;
+    }
+  }
+
+  $cnt;
 }
 
 =head1 INTERNAL METHODS?
@@ -506,7 +583,7 @@ sub stats
 
   my $t= $self->{'stats'}->{$what};
      $t= $self->{'stats'}->{$what}= {} unless (defined ($t));
-  # print "accessing stats=[$what]: ", main::Dumper($self);
+  # print "accessing stats=[$what]: ", Dumper($self);
   $t;
 }
 

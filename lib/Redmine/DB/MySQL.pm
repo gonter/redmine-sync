@@ -4,6 +4,8 @@ package Redmine::DB::MySQL;
 use strict;
 use parent 'Redmine::DB';
 
+use Data::Dumper;
+
 # use Redmine::DB::Project;
 
 my $show_query= 0;
@@ -34,7 +36,7 @@ sub table
 
   my $t= $self->{$table};
      $t= $self->{$table}= {} unless (defined ($t));
-  # print "accessing table=[$table]: ", main::Dumper($self);
+  # print "accessing table=[$table]: ", Dumper($self);
   $t;
 }
 
@@ -48,14 +50,14 @@ sub get_all_x
   return undef unless (defined ($dbh));
 
   # my $project= new Redmine::DB::Project (%par);
-  # print "project: ", main::Dumper ($project);
+  # print "project: ", Dumper ($project);
 
   my $ss= "SELECT * FROM $table";
 
   my @v= ();
   if (defined ($where))
   {
-    # print "where: ", main::Dumper ($where) if ($show_query);
+    # print "where: ", Dumper ($where) if ($show_query);
     $ss .= ' WHERE ' . shift (@$where);
     @v= @$where;
   }
@@ -75,7 +77,7 @@ sub get_all_x
 
   while (defined (my $x= $sth->fetchrow_hashref()))
   {
-    print "x: ", main::Dumper ($x) if ($show_fetched);
+    print "x: ", Dumper ($x) if ($show_fetched);
     $t->{$x->{'id'}}= $x;
   }
 
@@ -122,7 +124,7 @@ sub insert
 sub mysql
 {
   my $self= shift;
-  print "self: ", main::Dumper ($self);
+  print "self: ", Dumper ($self);
 
   my @cmd= ('mysql', '-h', $self->{'host'}, '-u', $self->{'username'}, $self->{'database'}, '--password='.$self->{'password'});
   print ">> cmd=[", join (' ', @cmd), "]\n";
@@ -185,12 +187,12 @@ sub pcx_members
   $res->{'project'}= $proj;
   $res->{'members'}= $members;
 
-  # print "proj: ", main::Dumper($proj);
+  # print "proj: ", Dumper($proj);
 
   # --------------------------------------------------------------------
   # check for members and users
   my $users= $self->table('users');
-  # print "users: ", main::Dumper($users);
+  # print "users: ", Dumper($users);
   my @missing_users=();
   foreach my $member_id (keys %$members)
   {
@@ -206,6 +208,15 @@ sub pcx_members
 
   $res;
 }
+
+=head2 $con->pcx_wiki ($project_id)
+
+retrieve data related to the Wiki
+
+Right now, we assume we can handle the amount of data returned, see
+notes in the code.
+
+=cut
 
 sub pcx_wiki
 {
@@ -226,14 +237,29 @@ sub pcx_wiki
     if (@wiki_ids > 1)
     {
       print "ATTN: too many(?) wikis for project=$proj_id ";
-      print main::Dumper ($wikis);
+      print Dumper ($wikis);
     }
 
     foreach my $wiki_id (@wiki_ids)
     {
-      my $wiki_pages= $self->get_all_x ('wiki_pages', [ 'wiki_id=?', $proj_id ]);
-      $res->{'wiki_pages'}->{$wiki_id}= $wiki_pages;
-      # print "wiki_id=[$wiki_id] wiki_pages: ", main::Dumper ($wiki_pages);
+      my $wiki_pages= $self->get_all_x ('wiki_pages', [ 'wiki_id=?', $wiki_id ]);
+      # $res->{'wiki_pages'}->{$wiki_id}= $wiki_pages; # one layer too many!
+      $res->{'wiki_pages'}= $wiki_pages;
+      # print "wiki_id=[$wiki_id] wiki_pages: ", Dumper ($wiki_pages);
+
+      my $wiki_redirects= $self->get_all_x ('wiki_redirects', [ 'wiki_id=?', $wiki_id ]);
+      # $res->{'wiki_redirects'}->{$wiki_id}= $wiki_redirects;
+      $res->{'wiki_redirects'}= $wiki_redirects;
+
+      # fetch the Wiki text
+      # TODO: for now, assume we can handle the amount of data returned;
+      # it might be necessary to introduce callbacks deal with the text
+
+      my $sel= 'page_id IN (SELECT id FROM wiki_pages WHERE wiki_id=?)';
+      my $wiki_contents=         $self->get_all_x ('wiki_contents',         [ $sel, $wiki_id ]);
+      my $wiki_content_versions= $self->get_all_x ('wiki_content_versions', [ $sel, $wiki_id ]);
+      $res->{'wiki_contents'}=         $wiki_contents;
+      $res->{'wiki_content_versions'}= $wiki_content_versions;
     }
   }
 
