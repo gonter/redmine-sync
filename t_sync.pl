@@ -9,7 +9,10 @@ use warnings;
 
 =head1 DESCRIPTION
 
-do stuff on a Redmine database
+Do stuff on a Redmine database.  Used as an experimental sync-tool to
+migrate individual projects to another server.
+
+See https://github.com/gonter/redmine-sync
 
 =head1 OPERATION MODES
 
@@ -31,10 +34,23 @@ use Redmine::DB::MySQL;
 use Redmine::DB::CTX;
 # use Redmine::DB::Project; nothing here yet ...
 
-# yeah, this should be in a config file, but 
-my $setup_file;
+# --- BEGIN ------------------------------------------------------------
 
-# this structure ($setup) resembles something like a "context"
+=begin comment
+
+Yeah, this should be in a config file, but this will do for now.
+
+This structure ($setup) resembles something like a "synchronisation
+context".  A "synchronisation context" needs to describe:
+
+* src: source Redmine instance
+* dst: destination Redmine instance
+* projects to be synced
+
+=end comment
+=cut
+
+my $setup_file;
 my $setup=
 {
   'src' =>
@@ -48,10 +64,10 @@ my $setup=
     'db' => 'production',
   },
   'sync_context_id' => 1,
-  'syncs' =>
+  'syncs' => # not used, instead, this is written directly into the database
   [
     # { 'table' => 'projects', 'src_id' => 170, 'dst_id' => 1 }
-    { 'table' => 'auth_sources', 'src_id' => 1, 'dst_id' => 1, }
+    { 'table' => 'auth_sources', 'src_id' => 1, 'dst_id' => 1 }
   ],
   'sync_projects' =>
   [
@@ -61,6 +77,7 @@ my $setup=
     }
   ]
 };
+# --- END --------------------------------------------------------------
 
 my @parameters= ();
 my $op_mode= 'usage';
@@ -139,7 +156,6 @@ elsif ($op_mode eq 'user')
     my $user= $cfg->get_user ($an, $av);
     print "user: ", Dumper ($user);
   }
-
 }
 elsif ($op_mode eq 'syncuser')
 {
@@ -176,7 +192,7 @@ elsif ($op_mode eq 'sync')
 
   print "\n"x3, '='x72, "\n", "Statistics:", Dumper ($ctx->{'stats'});
 }
-elsif ($op_mode eq 'diag')
+elsif ($op_mode eq 'xxxdiag')
 {
   my $src= read_configs($setup, 'src');
   my $dst= read_configs($setup, 'dst');
@@ -191,7 +207,6 @@ elsif ($op_mode eq 'diag')
 
 # my $src_members= $src->get_project_members (... some project id ...);
 # print "src_members: ", Dumper ($src_members);
-
 
 # print "src: ", Dumper ($src);
 }
