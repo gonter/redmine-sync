@@ -57,11 +57,15 @@ my $setup=
   {
     'config' => '/home/gg/etc/src/database.yml',
     'db' => 'production',
+    'attachment_base' => '/home/backup/redmine-phaidra/files',
+    'attachment_with_directory' => 0, # Redmine version 1.x does not have that attribute
   },
   'dst' =>
   {
     'config' => '/home/gg/etc/dst/database.yml',
     'db' => 'production',
+    'attachment_base' => '/var/lib/redmine/default/files',
+    'attachment_with_directory' => 1, # Redmine version 2.x has that attribute
   },
   'sync_context_id' => 1,
   'syncs' => # not used, instead, this is written directly into the database
@@ -111,6 +115,39 @@ sub usage
 {
   system ('perldoc', $0);
   exit (0);
+}
+
+# callback function to actually copy the attachment files
+# NOTE/TODO: be sure about the permissions, this script needs to write into Redmine's files directory
+sub copy_attachment
+{
+  my $ctx=    shift;
+  my $orig=   shift;  # original record
+  my $synced= shift;  # synchronized record
+
+  my @s_fnm= $setup->{'src'}->{'attachment_base'}; # TODO/NOTE: hmm... the attachment_base doesn't make it into the context!
+  push (@s_fnm, $orig->{'disk_directory'}) if (exists ($orig->{'disk_directory'}) && defined ($orig->{'disk_directory'}));
+  push (@s_fnm, $orig->{'disk_filename'});
+  my $s_fnm= join ('/', @s_fnm);
+  # TODO: check if the file is there and stuff
+
+  my @d_fnm= $setup->{'dst'}->{'attachment_base'};
+
+  # if (exists ($synced->{'disk_directory'})) # ... && defined ($synced->{'disk_directory'}))
+  if ($setup->{'dst'}->{'attachment_with_directory'})
+  { # new Redmine version has a structured attachments directory
+    my $disk_dir= join ('/', 'sync', $setup->{'sync_context_id'});
+    push (@d_fnm, $disk_dir);
+    $ctx->{'dst'}->update ('attachments', $synced->{'id'}, { 'disk_directory' => $disk_dir });
+  }
+
+  my $d_fnm= join ('/', @d_fnm);
+  system ('mkdir', '-p', $d_fnm) unless (-d $d_fnm);
+  $d_fnm .= '/'.  $synced->{'disk_filename'};
+
+  print "copy attachment [$s_fnm] -> [$d_fnm]\n";
+
+  system ('cp', $s_fnm, $d_fnm);
 }
 
    if ($op_mode eq 'usage') { usage(); }
@@ -179,7 +216,8 @@ elsif ($op_mode eq 'sync')
   my $dst= read_configs($setup, 'dst');
   # my $x_u= $src->get_all_users();
 
-  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'src' => $src, 'dst' => $dst);
+  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'src' => $src, 'dst' => $dst,
+     'copy_attachment' => \&copy_attachment);
 
   # print "setup: ", Dumper ($setup);
 

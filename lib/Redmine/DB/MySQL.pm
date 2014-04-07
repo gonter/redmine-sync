@@ -40,6 +40,18 @@ sub table
   $t;
 }
 
+=head2 $con->get_all_x ($table_name, $query_ref)
+
+Query_ref is an array reference where the first parameter gives the WHERE clause (without the string "WHERE").
+The query should not contain untrustable values, these should be indicated by placeholders (an "?" for each
+value).  The values make up the rest of the array reference.
+
+Side effect: caches values in $con->{$table_name};
+
+Returns all retrieved records.
+
+=cut
+
 sub get_all_x
 {
   my $self= shift;
@@ -74,14 +86,16 @@ sub get_all_x
   $sth->execute(@v);
 
   my $t= $self->table($table);
+  my $tt= {};
 
   while (defined (my $x= $sth->fetchrow_hashref()))
   {
     print "x: ", Dumper ($x) if ($show_fetched);
-    $t->{$x->{'id'}}= $x;
+    my $i= $x->{'id'};
+    $t->{$i}= $tt->{$i}= $x;
   }
 
-  $t;
+  $tt;
 }
 
 sub insert
@@ -121,6 +135,33 @@ sub insert
   $id;
 }
 
+sub update
+{
+  my $self= shift;
+  my $table= shift;
+  my $id= shift;
+  my $updates= shift;
+
+  my $dbh= $self->connect();
+  return undef unless (defined ($dbh));
+
+  my (@vars, @vals);
+  foreach my $an (keys %$updates)
+  {
+    push (@vars, $an);
+    push (@vals, $updates->{$an});
+  }
+  push (@vals, $id);
+
+  my $ssu= "UPDATE `$table` SET ". join (' ', map { $_.'=?' } @vars) . ' WHERE id=?';
+  print "ssu=[$ssu]\n";
+  print "vals: ", join (',', @vals), "\n";
+  my $sth= $dbh->prepare($ssu);
+  $sth->execute(@vals);
+  print "ERROR: ", $dbh->errstr() if ($dbh->err);
+  $sth->finish();
+}
+
 sub mysql
 {
   my $self= shift;
@@ -158,7 +199,7 @@ sub get_users
 
   # print "missing users: [", join (' ', @missing_users), "]\n";
   my $in= $an . ' IN ('. join(',', map { '?' } @_) . ')';
-  $show_query= $show_fetched= 1;
+  # $show_query= $show_fetched= 1;
   $self->get_all_x ('users', [ $in, @_ ]),
 }
 
@@ -211,7 +252,7 @@ sub pcx_members
 
 =head2 $con->pcx_wiki ($project_id)
 
-retrieve data related to the Wiki
+Retrieve data related to the Wiki associated with $project_id.
 
 Right now, we assume we can handle the amount of data returned, see
 notes in the code.
@@ -240,7 +281,7 @@ sub pcx_wiki
       print Dumper ($wikis);
     }
 
-    foreach my $wiki_id (@wiki_ids)
+    PROJECT_WIKI: foreach my $wiki_id (@wiki_ids)
     {
       my $wiki_pages= $self->get_all_x ('wiki_pages', [ 'wiki_id=?', $wiki_id ]);
       # $res->{'wiki_pages'}->{$wiki_id}= $wiki_pages; # one layer too many!
@@ -255,11 +296,26 @@ sub pcx_wiki
       # TODO: for now, assume we can handle the amount of data returned;
       # it might be necessary to introduce callbacks deal with the text
 
-      my $sel= 'page_id IN (SELECT id FROM wiki_pages WHERE wiki_id=?)';
-      my $wiki_contents=         $self->get_all_x ('wiki_contents',         [ $sel, $wiki_id ]);
-      my $wiki_content_versions= $self->get_all_x ('wiki_content_versions', [ $sel, $wiki_id ]);
+      my $sel_wiki_pages= '(SELECT id FROM wiki_pages WHERE wiki_id=?)';
+      my $wiki_contents=         $self->get_all_x ('wiki_contents',         [ 'page_id IN ' . $sel_wiki_pages, $wiki_id ]);
+      my $wiki_content_versions= $self->get_all_x ('wiki_content_versions', [ 'page_id IN ' . $sel_wiki_pages, $wiki_id ]);
       $res->{'wiki_contents'}=         $wiki_contents;
       $res->{'wiki_content_versions'}= $wiki_content_versions;
+
+      # attachments
+      my $sel2= 'container_id IN ' . $sel_wiki_pages . " AND container_type='WikiPage'";
+      my $wiki_attachments=       $self->get_all_x ('attachments', [ $sel2, $wiki_id ]);
+      $res->{'wiki_attachments'}= $wiki_attachments;
+
+      # watchers
+$show_query= 1;
+      my $wiki_watchers=       $self->get_all_x ('watchers', [ "watchable_type='Wiki' AND watchable_id=?", $wiki_id ]);
+      my $wiki_page_watchers=  $self->get_all_x ('watchers', [ "watchable_type='WikiPage' AND watchable_id IN ".$sel_wiki_pages, $wiki_id ]);
+
+      $res->{'wiki_watchers'}= $wiki_watchers;
+      $res->{'wiki_page_watchers'}= $wiki_page_watchers;
+
+      last PROJECT_WIKI; # TODO: hmm... I really should check if there could be more than one wiki per project
     }
   }
 

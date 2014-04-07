@@ -36,8 +36,8 @@ sub sync_project
   my $sp_id= shift;
   my $dp_id= shift;
 
-  # $ctx->sync_project_members ($sp_id, $dp_id);
-  # $ctx->sync_project_user_preferences ($sp_id, $dp_id);
+  $ctx->sync_project_members ($sp_id, $dp_id);
+  $ctx->sync_project_user_preferences ($sp_id, $dp_id);
   $ctx->sync_wiki ($sp_id, $dp_id);
 }
 
@@ -233,7 +233,7 @@ would not really be an issue.
     my $s_user=      $s_users->{$s_user_id};
 # next unless ($s_user->{'type'} eq 'Group');
 
-    print "s_member: ", Dumper ($s_member);
+    # print "s_member: ", Dumper ($s_member);
     my $d_user_id= $ctx->sync_user ($s_user_id, $s_user);
 
     my ($d_member_id, $d_status, $d_sync_date)= $ctx->translate ('members', $s_member_id);
@@ -370,7 +370,7 @@ sub sync_user
     $s_user= $res->{$s_user_id};
   }
 
-    print "s_user: ", Dumper ($s_user);
+    # print "s_user: ", Dumper ($s_user);
 
     my ($d_user_id, $d_status, $d_sync_date)= $ctx->translate ('users', $s_user_id);
     print "s_user_id=[$s_user_id] d_user_id=[$d_user_id] d_status=[$d_status] d_sync_date=[$d_sync_date]\n";
@@ -506,7 +506,43 @@ sub sync_wiki
   $ctx->sync_generic_table ($s_pcx, 'wiki_redirects', [ [ 'wiki_id' => 'wikis' ] ]);
   $ctx->sync_generic_table ($s_pcx, 'wiki_contents',  [ [ 'page_id' => 'wiki_pages' ], ['author_id' => 'users' ] ]);
   $ctx->sync_generic_table ($s_pcx, 'wiki_content_versions',  [ [ 'wiki_content_id' => 'wiki_contents'], [ 'page_id' => 'wiki_pages' ], ['author_id' => 'users' ] ]);
+
+  print '='x72, "\n";
+  # print "attachments: ", Dumper ($s_pcx->{'wiki_attachments'});
+
+  # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+  # attachments
+  my $added= $ctx->sync_generic_table ($s_pcx, 'wiki_attachments',  [ [ 'container_id' => 'wiki_pages'], [ 'author_id' => 'users' ] ]);
+  # print "added: ", Dumper ($added);
+
+  if (defined ($ctx->{'copy_attachment'}))
+  {
+    my $cpa= $ctx->{'copy_attachment'};
+    foreach my $item (@$added)
+    {
+      &$cpa ($ctx, @$item);
+    }
+  }
+
+  # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+  # watchers
+  print "wiki_watchers: ", Dumper ($s_pcx->{'wiki_watchers'});
+  print "wiki_page_watchers: ", Dumper ($s_pcx->{'wiki_page_watchers'});
+  $ctx->sync_generic_table ($s_pcx, 'wiki_watchers',       [ [ 'watchable_id' => 'wikis'     ], [ 'user_id' => 'users' ] ]);
+  $ctx->sync_generic_table ($s_pcx, 'wiki_page_watchers',  [ [ 'watchable_id' => 'wiki_pages'], [ 'user_id' => 'users' ] ]);
 }
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# virtual tables: process attachments separately for each container type,
+# so syncing the wiki will sync the wiki's attachments and ignore those
+# of the issues etc.
+
+my %TLT_table_name=
+(
+  'wiki_attachments'   => 'attachments',
+  'wiki_watchers'      => 'watchers',
+  'wiki_page_watchers' => 'watchers',
+);
 
 sub sync_generic_table
 {
@@ -519,23 +555,27 @@ sub sync_generic_table
   print "sync_generic_table: table_name=[$table_name]\n";
   my $table= $s_pcx->{$table_name};
   # print "table [$table_name] ", Dumper ($table); exit;
+  my $tlt_table_name= $TLT_table_name{$table_name} || $table_name;
 
+  my @added= ();
   my $cnt= $ctx->stats($table_name);
   my @s_ids= sort { $a <=> $b} keys %$table; # maybe sorting helps to bring order into an hierarchy
   print "s_ids: ", join (',', @s_ids), "\n";
   ITEM: while (my $s_id= shift (@s_ids))
   {
-    my $d_id= $ctx->translate ($table_name, $s_id);
+    my $d_id= $ctx->translate ($tlt_table_name, $s_id);
     print "d_id=[$d_id]\n";
     $cnt->{'processed'}++;
 
     if (defined ($d_id))
-    {
+    { # TODO: the object is already on the destination, maybe we should
+      # fetch it and see if any records need to be updated.
       $cnt->{'unchanged'}++;
     }
     else
     {
-      my %data= %{$table->{$s_id}};
+      my $orig= $table->{$s_id};
+      my %data= %$orig;
       delete ($data{'id'});
 
       # translate attributes (an) pointing to table (tn); $tlt is a list of pairs
@@ -548,7 +588,7 @@ sub sync_generic_table
 
         unless (defined ($d_av))
         {
-          if ($tn eq $table_name)
+          if ($tn eq $tlt_table_name)
           { # this is a self referential table, put the (yet unresolved) to the head of the queue
             # TODO: this could lead to an endless loop!
             unshift (@s_ids, $s_av);
@@ -563,16 +603,21 @@ sub sync_generic_table
         $data{$an}= $d_av;
       }
 
-      $d_id= $ctx->{'dst'}->insert ($table_name, \%data);
-      $ctx->store_translation($table_name, $s_id, $d_id);
+      $d_id= $ctx->{'dst'}->insert ($tlt_table_name, \%data);
+      $ctx->store_translation($tlt_table_name, $s_id, $d_id);
+      $data{'id'}= $d_id; # now we know the record's id, so we can as well save it
+
       $cnt->{'added'}++;
+      push (@added, [ $orig, \%data ]);
     }
   }
 
-  $cnt;
+  \@added;
 }
 
-=head1 INTERNAL METHODS?
+=head1 INTERNAL METHODS
+
+or so..
 
 =cut
 
