@@ -41,6 +41,34 @@ sub sync_project
   $ctx->sync_wiki ($sp_id, $dp_id);
 }
 
+sub sync_cleanup_project
+{
+  my $ctx= shift;
+  my $dp_id= shift;
+
+  my $dbh= $ctx->{'dst'}->connect();
+  return undef unless (defined ($dbh));
+
+=begin comment
+
+  $ctx->{'tlt'}= undef;
+
+not ready...
+
+  my @tables= qw(watchers);
+  foreach my $table (@tables)
+  {
+    my $ss_0= 'FROM `syncs` WHERE table_name=? AND 
+    my $ss_1= "SELECT id
+  }
+
+  $ctx->{'tlt'}= undef;
+
+=end comment
+=cut
+
+}
+
 =head1 TRANSLATION
 
 Possibly the most important aspect of a synchronisation job is the

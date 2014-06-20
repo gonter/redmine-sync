@@ -9,12 +9,14 @@ use warnings;
 
 =head1 DESCRIPTION
 
-Do stuff on a Redmine database.  Used as an experimental sync-tool to
-migrate individual projects to another server.
+Do stuff on a Redmine MySQL database.  Used as an experimental sync-tool
+to migrate individual projects to another instance.
 
 See https://github.com/gonter/redmine-sync
 
 =head1 OPERATION MODES
+
+--mysql <src|dst>  ... connect to source or destinance instance's MySQL databae
 
 =cut
 
@@ -53,17 +55,28 @@ context".  A "synchronisation context" needs to describe:
 my $setup_file;
 my $setup=
 {
+  'dst' =>
+  {
+    'config' => '/home/gg/etc/dst/database.yml',
+    'db'     => 'production',
+    'attachment_base' => '/var/lib/redmine/default/files',
+    'attachment_with_directory' => 1, # Redmine version 2.x has that attribute
+  },
+};
+
+my $setup_OLD=
+{
   'src' =>
   {
     'config' => '/home/gg/etc/src/database.yml',
-    'db' => 'production',
+    'db'     => 'production',
     'attachment_base' => '/home/backup/redmine-phaidra/files',
     'attachment_with_directory' => 0, # Redmine version 1.x does not have that attribute
   },
   'dst' =>
   {
     'config' => '/home/gg/etc/dst/database.yml',
-    'db' => 'production',
+    'db'     => 'production',
     'attachment_base' => '/var/lib/redmine/default/files',
     'attachment_with_directory' => 1, # Redmine version 2.x has that attribute
   },
@@ -105,6 +118,7 @@ while (my $arg= shift (@ARGV))
     foreach my $opt (@opts)
     {
       if ($opt eq 'h') { usage(); }
+      elsif ($opt eq 'X') { $setup= $setup_OLD; }
       else { die "unknown option [$opt]"; }
     }
   }
@@ -156,7 +170,7 @@ elsif ($op_mode eq 'prep')
   my $dst= read_configs($setup, 'dst');
   prepare_sync_table ($dst);
 }
-elsif ($op_mode eq 'sdp') # sdp: show destination intance's projects
+elsif ($op_mode eq 'sdp') # sdp: show destination instance's projects
 {
   my $dst= read_configs($setup, 'dst');
 
@@ -184,8 +198,10 @@ elsif ($op_mode eq 'user')
 {
   my $target= shift (@parameters);
   usage() unless (defined ($target));
+
   my $an= shift (@parameters);
   usage() unless (defined ($an));
+
   my $cfg= read_configs($setup, $target);
 
   foreach my $av (@parameters)
@@ -209,6 +225,21 @@ elsif ($op_mode eq 'syncuser')
   {
     $ctx->sync_user ($s_user_id, $res->{$s_user_id});
   }
+}
+elsif ($op_mode eq 'cleanup')
+{
+  my $dst= read_configs($setup, 'dst');
+
+  my $ctx= new Redmine::DB::CTX ('ctx_id' => $setup->{'sync_context_id'}, 'dst' => $dst);
+  foreach my $sp (@{$setup->{'sync_projects'}})
+  {
+    # print "sp: ", Dumper ($sp);
+
+print "not yet implemented\n";
+    # $ctx->sync_cleanup_project ($sp->{'dst_proj'});
+  }
+
+  print "\n"x3, '='x72, "\n", "Statistics:", Dumper ($ctx->{'stats'});
 }
 elsif ($op_mode eq 'sync')
 {
@@ -293,3 +324,12 @@ sub prepare_sync_table
         $ddl_syncs,
         "--- >8 ---\n";
 }
+
+__END__
+
+=head1 TODO
+
+ * currently, only MySQL source and targets were used, supporting
+   PostgreSQL and/or sqlite would be nice as well
+
+
