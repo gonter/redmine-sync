@@ -55,6 +55,13 @@ context".  A "synchronisation context" needs to describe:
 my $setup_file;
 my $setup=
 {
+  'src' =>
+  {
+    'config' => '/home/gg/etc/src/database.yml',
+    'db'     => 'production',
+    'attachment_base' => '/home/backup/redmine-phaidra/files',
+    'attachment_with_directory' => 0, # Redmine version 1.x does not have that attribute
+  },
   'dst' =>
   {
     'config' => '/home/gg/etc/dst/database.yml',
@@ -66,13 +73,6 @@ my $setup=
 
 my $setup_OLD=
 {
-  'src' =>
-  {
-    'config' => '/home/gg/etc/src/database.yml',
-    'db'     => 'production',
-    'attachment_base' => '/home/backup/redmine-phaidra/files',
-    'attachment_with_directory' => 0, # Redmine version 1.x does not have that attribute
-  },
   'dst' =>
   {
     'config' => '/home/gg/etc/dst/database.yml',
