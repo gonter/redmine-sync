@@ -81,7 +81,7 @@ sub get_DDL { return ($TABLE_sync_contexts, $TABLE_syncs); }
 
 =head2 $context->init_translation()
 
-Read the known translation table for the give synchronisation context
+Read the known translation table for the given synchronisation context
 and keep it around.
 
 =cut
