@@ -98,6 +98,31 @@ sub get_all_x
   $tt;
 }
 
+sub fetch_custom
+{
+  my $db= shift;
+  my $cfid= shift;
+  my $cfty= shift || 'Issue';
+
+  my $res= $db->get_all_x ('custom_values',
+      [ "custom_field_id=? and customized_type=? and value<>''", $cfid, $cfty ]);
+  $res;
+}
+
+sub insert_custom
+{
+  my $db= shift;
+  my $cfid= shift;
+  my $cfty= shift || 'Issue';
+  my $cfref= shift;
+  my $cfval= shift;
+
+  my $res= $db->insert ('custom_values',
+      { customized_type => $cfty, customized_id => $cfref,
+        custom_field_id => $cfid, value => $cfval, } );
+  $res;
+}
+
 sub insert
 {
   my $self= shift;
