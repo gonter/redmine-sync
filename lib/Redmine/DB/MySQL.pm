@@ -105,21 +105,37 @@ sub fetch_custom
   my $cfty= shift || 'Issue';
 
   my $res= $db->get_all_x ('custom_values',
-      [ "custom_field_id=? and customized_type=? and value<>''", $cfid, $cfty ]);
+      [ "custom_field_id=? and customized_type=?", $cfid, $cfty ]);
   $res;
 }
 
-sub insert_custom
+sub change_custom_value
 {
   my $db= shift;
   my $cfid= shift;
   my $cfty= shift || 'Issue';
-  my $cfref= shift;
+  my $cfref= shift; # ticket number or whatever
+  my $cfrid= shift; # record id
   my $cfval= shift;
 
-  my $res= $db->insert ('custom_values',
+  my $data=
       { customized_type => $cfty, customized_id => $cfref,
-        custom_field_id => $cfid, value => $cfval, } );
+        custom_field_id => $cfid, value => $cfval };
+
+  print "change_custom_value: cfrid=[$cfrid] ", join (' ', %$data), "\n";
+  # return 0; # TODO: add flag to supress changes
+
+  my $res;
+  if (defined ($cfrid))
+  {
+    $db->update ('custom_values', $cfrid, $data);
+    $res= $cfrid;
+  }
+  else
+  {
+    $res= $db->insert ('custom_values', $data);
+  }
+
   $res;
 }
 
@@ -178,7 +194,7 @@ sub update
   }
   push (@vals, $id);
 
-  my $ssu= "UPDATE `$table` SET ". join (' ', map { $_.'=?' } @vars) . ' WHERE id=?';
+  my $ssu= "UPDATE `$table` SET ". join (', ', map { $_.'=?' } @vars) . ' WHERE id=?';
   print "ssu=[$ssu]\n";
   print "vals: ", join (',', @vals), "\n";
   my $sth= $dbh->prepare($ssu);
