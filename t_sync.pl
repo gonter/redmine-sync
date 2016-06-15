@@ -300,7 +300,7 @@ sub read_configs
   # $ss->{'_cfg'}=
   my $c= $x->{$db};
 
-  $c->{'adapter'}= 'mysql' if ($c->{'adapter'} eq 'mysql2');
+  # $c->{'adapter'}= 'mysql' if ($c->{'adapter'} eq 'mysql2');
   my $m= new Redmine::DB::MySQL (%$c);
 
   $ss->{'m'}= $m;
