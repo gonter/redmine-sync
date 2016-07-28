@@ -39,9 +39,51 @@ sub attach
 
   return $self->{_rm} if (exists ($self->{_rm}));
 
-  my $rm= new WebService::Redmine (%{$self->{'cfg'}->{'redmine'}});
+  my $rm= new WebService::Redmine (%{$self->{'cfg'}});
   # print "rm: ", Dumper ($rm);
   $self->{_rm}= $rm;
+}
+
+sub get_mapped_id
+{
+  my $self= shift;
+  my $map_name= shift;
+  my $name= shift;
+
+  my $c= $self->{'cfg'};
+  # print "cfg: ", main::Dumper ($c);
+  my $m= $c->{$map_name.'_ids'};
+
+  # print "map_name=[$map_name] name=[$name] m=", main::Dumper ($m);
+
+  my $id;
+  if (exists ($m->{$name}))
+  {
+    $id= $m->{$name};
+  }
+  else
+  {
+    print "ATTN: no id known for $map_name=[$name]\n";
+    # TODO: add a lookup ...
+  }
+
+  $id;
+}
+
+sub get_tracker_id
+{
+  my $self= shift;
+  my $tracker_name= shift;
+
+  $self->get_mapped_id ('tracker_ids', $tracker_name);
+}
+
+sub get_project_id
+{
+  my $self= shift;
+  my $project_name= shift;
+
+  $self->get_mapped_id ('project_ids', $project_name);
 }
 
 sub fixup_issue
@@ -50,9 +92,9 @@ sub fixup_issue
   my $issue= shift;
   my $par= shift;
 
-  foreach my $key (keys %$par)
+  foreach my $cf_name (keys %$par)
   {
-    if ($key eq 'custom_fields')
+    if ($cf_name eq 'custom_fields')
     {
       transcribe_custom_fields ($self->{'cfg'}->{'custom_field_ids'}, $issue, $par->{'custom_fields'});
     }
@@ -76,7 +118,7 @@ sub transcribe_custom_fields
   my $issue= shift;
   my $kv= shift;
  
-  print "ids: ", main::Dumper($ids);
+  # print "ids: ", main::Dumper($ids);
 
   $issue->{custom_fields}= [] unless (defined ($issue->{custom_fields}));
   my $cf= $issue->{custom_fields};
@@ -86,7 +128,7 @@ sub transcribe_custom_fields
     my $cf_i= $cf->[$i];
     $idx{$cf_i->{'name'}}= $i;
   }
-  print "cf: ", main::Dumper($cf);
+  # print "cf: ", main::Dumper($cf);
 
   # update incoming custom fields
   AN: foreach my $an (keys %$kv)
@@ -100,8 +142,8 @@ sub transcribe_custom_fields
     my $new_val=
     {
       'value' => $kv->{$an},
-      'id' => $ids->{$an},
-      'name' => $an,
+      'id'    => $ids->{$an},
+      'name'  => $an,
     };
 
     if (exists ($idx{$an}))
@@ -114,7 +156,7 @@ sub transcribe_custom_fields
     }
   }
 
-  print "issue: ", main::Dumper($issue);
+  # print "issue: ", main::Dumper($issue);
 }
 
 1;
