@@ -11,9 +11,9 @@ use Data::Dumper;
 my $show_query= 0;
 my $show_fetched= 0;
 
-sub show_fetched { shift; $show_fetched= shift; }
-sub show_query { shift; $show_query= shift; }
-sub verbose { shift; $show_fetched= $show_query= shift; }
+sub show_fetched { shift; my $ret= $show_fetched; $show_fetched= shift; $ret; }
+sub show_query   { shift; my $ret= $show_query; $show_query= shift; $ret }
+sub verbose      { shift; my @ret= ($show_fetched, $show_query); $show_fetched= $show_query= shift; @ret; }
 
 sub connect
 {
@@ -22,10 +22,13 @@ sub connect
   my $dbh= $self->{'_dbh'};
   return $dbh if (defined ($dbh));
 
-  my $db_con= join (':', 'dbi', map { $self->{$_} } qw(adapter database host));
-  print "db_con=[$db_con]\n";
+  my $adapter= $self->{adapter};
+  $adapter= 'mysql' if ($adapter eq 'mysql2');
+
+  my $db_con= join (':', 'dbi', $adapter, map { $self->{$_} } qw(database host));
+  # print "db_con=[$db_con]\n";
   $dbh= DBI->connect($db_con, map { $self->{$_} } qw(username password));
-  print "dbh=[$dbh]\n";
+  # print "dbh=[$dbh]\n";
   $self->{'_dbh'}= $dbh;
 }
 
@@ -40,7 +43,7 @@ sub table
   $t;
 }
 
-=head2 $con->get_all_x ($table_name, $query_ref)
+=head2 $con->get_all_x ($table_name, $query_ref, $field_ref)
 
 Query_ref is an array reference where the first parameter gives the WHERE clause (without the string "WHERE").
 The query should not contain untrustable values, these should be indicated by placeholders (an "?" for each
@@ -57,14 +60,12 @@ sub get_all_x
   my $self= shift;
   my $table= shift;
   my $where= shift;
+  my $field_ref= shift || '*';
 
   my $dbh= $self->connect();
   return undef unless (defined ($dbh));
 
-  # my $project= new Redmine::DB::Project (%par);
-  # print "project: ", Dumper ($project);
-
-  my $ss= "SELECT * FROM $table";
+  my $ss= "SELECT $field_ref FROM $table";
 
   my @v= ();
   if (defined ($where))
@@ -88,55 +89,130 @@ sub get_all_x
   my $t= $self->table($table);
   my $tt= {};
 
+  my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : 'id';
   while (defined (my $x= $sth->fetchrow_hashref()))
   {
     print "x: ", Dumper ($x) if ($show_fetched);
-    my $i= $x->{'id'};
+    my $i= $x->{$pri};
     $t->{$i}= $tt->{$i}= $x;
   }
 
   $tt;
 }
 
-sub fetch_custom
+sub delete_all_x
 {
-  my $db= shift;
-  my $cfid= shift;
-  my $cfty= shift || 'Issue';
+  my $self= shift;
+  my $table= shift;
+  my $where= shift;
+  my $field_ref= shift || '*';
 
-  my $res= $db->get_all_x ('custom_values',
-      [ "custom_field_id=? and customized_type=?", $cfid, $cfty ]);
-  $res;
+  my $dbh= $self->connect();
+  return undef unless (defined ($dbh));
+
+  my $ss= "DELETE $field_ref FROM $table";
+
+  my @v= ();
+  if (defined ($where))
+  {
+    # print "where: ", Dumper ($where) if ($show_query);
+    $ss .= ' WHERE ' . shift (@$where);
+    @v= @$where;
+  }
+
+  if ($show_query)
+  {
+    print "ss=[$ss]";
+    print ' vars: ', join (',', @v) if (@v);
+    print "\n";
+  }
+
+  my $sth= $dbh->prepare($ss) or print $dbh->errstr;
+  # print "sth=[$sth]\n";
+  $sth->execute(@v);
 }
 
-sub change_custom_value
+sub tables
 {
-  my $db= shift;
-  my $cfid= shift;
-  my $cfty= shift || 'Issue';
-  my $cfref= shift; # ticket number or whatever
-  my $cfrid= shift; # record id
-  my $cfval= shift;
+  my $self= shift;
 
-  my $data=
-      { customized_type => $cfty, customized_id => $cfref,
-        custom_field_id => $cfid, value => $cfval };
+  my $dbh= $self->connect();
+  return undef unless (defined ($dbh));
 
-  print "change_custom_value: cfrid=[$cfrid] ", join (' ', %$data), "\n";
-  # return 0; # TODO: add flag to supress changes
+  my $ss= "SHOW TABLES";
 
-  my $res;
-  if (defined ($cfrid))
+  if ($show_query)
   {
-    $db->update ('custom_values', $cfrid, $data);
-    $res= $cfrid;
-  }
-  else
-  {
-    $res= $db->insert ('custom_values', $data);
+    print "ss=[$ss]\n";
   }
 
-  $res;
+  my $sth= $dbh->prepare($ss) or print $dbh->errstr;
+  # print "sth=[$sth]\n";
+  $sth->execute();
+
+  my $table_filter= $self->{table_filter};
+
+  my $table_names= $self->{table_names}= {};
+  while (defined (my $table_name= $sth->fetchrow_array()))
+  {
+    next if (defined ($table_filter) && &$table_filter($table_name) == 0);
+    $table_names->{$table_name}= undef;
+  }
+
+  $table_names;
+}
+
+sub desc_all
+{
+  my $self= shift;
+
+  my $table_names= $self->tables();
+
+  foreach my $table_name (sort keys %$table_names)
+  {
+    $self->desc($table_name);
+  }
+}
+
+sub desc
+{
+  my $self= shift;
+  my $table= shift;
+
+  my $dbh= $self->connect();
+  return undef unless (defined ($dbh));
+
+  my $ss= "DESC `$table`";
+
+  if ($show_query)
+  {
+    print "ss=[$ss]\n";
+  }
+
+  my $sth= $dbh->prepare($ss) or print $dbh->errstr;
+  # print "sth=[$sth]\n";
+  $sth->execute();
+
+  # get table definition
+  my $td= $self->{table_names}->{$table};
+  my $td= $self->{table_names}->{$table}= {} unless (defined ($td));
+  my $tt= $td->{'columns'}= [];
+
+  # my @desc_columns= qw(Field Type Null Key Default Extra);
+
+  while (defined (my @x= $sth->fetchrow_array()))
+  {
+    last unless (@x);
+    # print "x: ", Dumper (\@x); # if ($show_fetched);
+    push (@$tt, \@x);
+
+    if ($x[3] eq 'PRI')
+    {
+      $self->{PRI}->{$table}= $x[0];
+    }
+  }
+
+  $td;
 }
 
 sub insert
@@ -208,7 +284,8 @@ sub mysql
   my $self= shift;
   print "self: ", Dumper ($self);
 
-  my @cmd= ('mysql', '-h', $self->{'host'}, '-u', $self->{'username'}, $self->{'database'}, '--password='.$self->{'password'});
+  $ENV{MYSQL_PWD}= $self->{password};
+  my @cmd= ('mysql', '-h', $self->{'host'}, '-u', $self->{'username'}, $self->{'database'});
   print ">> cmd=[", join (' ', @cmd), "]\n";
   system (@cmd);
 }
@@ -374,6 +451,47 @@ sub pcx_user_preferences
   my $pref= $self->get_all_x ('user_preferences', [ 'user_id in (select user_id from members where project_id=?)', $proj_id ]);
 
   $res->{'user_preferences'}= $pref;
+
+  $res;
+}
+
+sub fetch_custom
+{
+  my $db= shift;
+  my $cfid= shift;
+  my $cfty= shift || 'Issue';
+
+  my $res= $db->get_all_x ('custom_values',
+      [ "custom_field_id=? and customized_type=?", $cfid, $cfty ]);
+  $res;
+}
+
+sub change_custom_value
+{
+  my $db= shift;
+  my $cfid= shift;
+  my $cfty= shift || 'Issue';
+  my $cfref= shift; # ticket number or whatever
+  my $cfrid= shift; # record id
+  my $cfval= shift;
+
+  my $data=
+      { customized_type => $cfty, customized_id => $cfref,
+        custom_field_id => $cfid, value => $cfval };
+
+  print "change_custom_value: cfrid=[$cfrid] ", join (' ', %$data), "\n";
+  # return 0; # TODO: add flag to supress changes
+
+  my $res;
+  if (defined ($cfrid))
+  {
+    $db->update ('custom_values', $cfrid, $data);
+    $res= $cfrid;
+  }
+  else
+  {
+    $res= $db->insert ('custom_values', $data);
+  }
 
   $res;
 }
