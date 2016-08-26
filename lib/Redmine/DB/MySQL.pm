@@ -200,7 +200,7 @@ sub desc
 
   # my @desc_columns= qw(Field Type Null Key Default Extra);
 
-  while (defined (my @x= $sth->fetchrow_array()))
+  while (my @x= $sth->fetchrow_array())
   {
     last unless (@x);
     # print "x: ", Dumper (\@x); # if ($show_fetched);
