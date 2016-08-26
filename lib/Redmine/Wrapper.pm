@@ -5,6 +5,11 @@ use strict;
 
 use WebService::Redmine;
 
+my %automapping=
+(
+  'project_ids' => 1,
+);
+
 sub new
 {
   my $class= shift;
@@ -57,14 +62,32 @@ sub get_mapped_id
   # print "map_name=[$map_name] name=[$name] m=", main::Dumper ($m);
 
   my $id;
+  my $perform_lookup= 0;
   if (exists ($m->{$name}))
   {
     $id= $m->{$name};
+    print "ATTN: no id known for $map_name=[$name]\n";
+
+    if (exists ($self->{automapping}) && $self->{automapping} >= 1)
+    { # TODO: add an *optional* lookup ...
+      $perform_lookup= 1;
+    }
   }
   else
   {
-    print "ATTN: no id known for $map_name=[$name]\n";
-    # TODO: add a lookup ...
+    print "ATTN: no *map* named [$map_name] available\n";
+    if (exists ($self->{automapping}) && $self->{automapping} >= 2 && exists ($automapping{$map_name}))
+    { # TODO: allow dynamically fetched maps, when the map name is valied, e.g. project_ids etc..
+      if ($name eq 'project')
+      {
+        my $pi= $self->get_project_info ($name);
+        $perform_lookup= 1 if (defined ($pi));
+      }
+    }
+  }
+
+  if (!defined ($id) && $perform_lookup)
+  {
   }
 
   $id;
@@ -84,6 +107,16 @@ sub get_project_id
   my $project_name= shift;
 
   $self->get_mapped_id ('project_ids', $project_name);
+}
+
+sub get_project_info
+{
+  my $self= shift;
+  my $name= shift;
+
+  my $rm= $self->attach();
+  my $proj= $rm->project( $name );
+  print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
 }
 
 sub fixup_issue
