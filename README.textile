@@ -34,5 +34,28 @@ check for that, it only looks at the syncs table.
 
 Also, the pre-configured trackers and roles need to be considered.
 
+h2. Redmine command line interface
+
+experimental CLI to interact with Redmine
+
+h3. config file example
+
+The default config file named "redmine.json" is searched in the directories '.', $HOME/etc, $HOME/bin, $HOME or
+can be specified via environment variable $REDMINE_CONFIG or the option --config=<filename>.
+
+<pre><code class="JSON">
+{
+  "Redmine": {
+    "protocol": "https",
+    "host": "redmine.example.org/redmine",
+    "key": "API-ACCESS-KEY-AS-FOUND-IN-REDMINE-XXXXX",
+    "project-name": "my-project",
+    "automapping" : 2
+  }
+}
+</code></pre>
+
 h2. TODOs
+
+* The CLI code needs a little more consideration and documentation ...
 
