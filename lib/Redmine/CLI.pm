@@ -3,7 +3,7 @@
 
 =head1 NAME
 
-  REdmine::CLI
+  Redmine::CLI
 
 =head1 DESCRIPTION
 
@@ -15,16 +15,65 @@ package Redmine::CLI;
 
 use strict;
 
+use Data::Dumper;
+use Pod::Simple::Text;
+use FileHandle;
+
+autoflush STDOUT 1;
+
 use Util::JSON;
 use Util::Simple_CSV;
 use Util::Matrix;
 
 use Redmine::Wrapper;
 
-use Data::Dumper;
+=head1 HELP TOPICS
+
+=cut
+
+my %HELP=
+(
+  'topics' => <<EOPOD,
+=head2 TOPICS
+
+The following help topics are available
+
+=over 1
+
+=item overview
+
+=item environment
+
+=back
+
+=cut
+EOPOD
+  'overview' => <<EOPOD,
+=head2 Overview
+
+  help [topic] (this overview)
+  list
+  show ticket
+=cut
+EOPOD
+
+  'env' => <<EOPOD,
+=head2 Enivironment
+
+=head3 default attributes
+
+  project_name
+  ticket_number
+
+=cut
+EOPOD
+);
 
 my $default_config_fnm= 'redmine.json';
 my @default_home_dirs= ('etc', undef, 'bin');
+
+my @env_vars= qw(project_name ticket_number);
+my %env_vars= map { $_ => 1 } @env_vars;
 
 sub new
 {
@@ -34,8 +83,8 @@ sub new
   {
      # defaults
      'cfg_stanza'   => 'Redmine',
-     'op_mode'      => 'list',
-     'project_name' => undef,
+     'op_mode'      => undef,
+     # 'project_name' => undef,
   };
 
   my @cfg_fnm= (
@@ -51,7 +100,7 @@ sub new
     # print "NOTE: trying [$f] as config filen name\n";
     if (-f $f)
     {
-      print "NOTE: picked [$f] as config filen name\n";
+      # print "NOTE: picked [$f] as config filen name\n";
       $obj->{'cfg_fnm'}= $f;
       last;
     }
@@ -99,28 +148,33 @@ sub parse_args
     {
       my ($opt, $val)= split ('=', $1, $2);
 
-         if ($opt eq 'help')     { usage(); }
+         if ($opt eq 'help')     { usage('help', 'usage'); exit(0); }
       elsif ($opt eq 'config')   { $self->{cfg_fnm}=      $val || shift (@ARGV); }
       elsif ($opt eq 'stanza')   { $self->{cfg_stanza}=   $val || shift (@ARGV); }
       elsif ($opt eq 'project')  { $self->{project_name}= $val || shift (@ARGV); }
-      elsif ($opt eq 'show') { $self->{op_mode}= 'show'; }
-      elsif ($opt eq 'list') { $self->{op_mode}= 'list'; }
+      # elsif ($opt eq 'show') { $self->{op_mode}= 'show'; }
+      # elsif ($opt eq 'list') { $self->{op_mode}= 'list'; }
       # TODO: allow extra arguments
-      else { usage(); }
+      else { usage('error', "unknown option --${arg}"); exit(0); }
     }
     elsif ($arg =~ /^-(.+)/)
     {
       foreach my $opt (split ('', $1))
       {
-         if ($opt eq 'h') { usage(); exit (0); }
+        if ($opt eq 'h') { usage('help', 'usage'); exit (0); exit(0); }
         # elsif ($opt eq 'x') { $x_flag= 1; }
-        else { usage(); }
+        else { usage('error', "unknown option -{$arg}"); }
       }
     }
     else
     {
       push (@PARS, $arg);
     }
+  }
+
+  unless (defined ($self->{op_mode}))
+  {
+    $self->{op_mode}= (@PARS) ? shift (@PARS) : 'help';
   }
 
   $self->{_pars}= \@PARS;
@@ -137,6 +191,17 @@ sub init
 
   $self->{_rm_cfg}= my $rm_cfg= $cfg->{$self->{cfg_stanza}};
 
+  # TODO: set defaults?
+
+  foreach my $an (@env_vars)
+  {
+    if (!defined ($self->{$an}) && exists ($rm_cfg->{$an}))
+    {
+      my $av= $self->{$an}= $rm_cfg->{$an};
+      # print "transcribing attribute='$an' ($av)\n";
+    }
+  }
+
   $self->{_rm_wrapper}= my $mRM= new Redmine::Wrapper ('cfg' => $rm_cfg);
 
   ($cfg, $mRM);
@@ -148,17 +213,15 @@ sub main_part2
 
   # print __LINE__, " self: ", Dumper ($self);
 
-  my ($mRM, $rm_cfg, $op_mode, $pars)= map { $self->{$_} } qw(_rm_wrapper _rm_cfg op_mode _pars);
-  unless (defined ($mRM))
-  {
-    print "ATTN: Redmine::Wrapper not defined!\n";
-    return undef;
-  }
+  my ($op_mode, $pars)= map { $self->{$_} } qw(op_mode _pars);
+
+  # print "op_mode=[$op_mode]\n";
+
+=begin comment
 
   # print __LINE__, " mRM: ", Dumper ($mRM);
 
-  print "op_mode=[$op_mode]\n";
-  my $project_name= $self->{'project_name'} || $rm_cfg->{'project-name'};
+  my $project_name= $self->{'project_name'} || $rm_cfg->{'project_name'};
   unless (defined ($project_name))
   { # TODO: look up project id in Redmine itself
     print "ATTN: no project name found in configuration!\n";
@@ -173,19 +236,148 @@ sub main_part2
     print "ATTN: no project_id found in config for project_name=[$project_name]\n";
   }
 
-  if ($op_mode eq 'show')
+=end comment
+=cut
+
+  interpret($self, $op_mode, $pars);
+}
+
+sub interpret
+{
+  my $self= shift;
+  my $op_mode= shift;
+  my $pars= shift;
+
+  my $mRM= $self->{_rm_wrapper};
+
+  unless (defined ($mRM))
   {
-    my $rm= $mRM->attach();
-    foreach my $ticket_number (@$pars)
+    print "ATTN: Redmine::Wrapper not defined!\n";
+    return undef;
+  }
+
+     if ($op_mode eq 'help') { usage('help', (@$pars) ? shift (@$pars) : 'overview'); }
+  elsif ($op_mode eq 'exit') { return 0; }
+  elsif ($op_mode eq 'interact' || $op_mode eq 'i')
+  {
+    $self->interact ();
+  }
+  elsif ($op_mode eq 'env')
+  {
+    foreach my $an (@env_vars)
     {
-      Redmine::CLI::show_issue ($rm, $ticket_number);
+      printf ("%12s = '%s'\n", $an, $self->{$an});
+    }
+  }
+  elsif ($op_mode eq 'set')
+  {
+    my $an= shift (@$pars);
+
+    if (exists ($env_vars{$an}))
+    {
+      $self->{$an}= join (' ', @$pars);
+    }
+    else
+    {
+      usage ('error', "unknown environment variable '$an'", 'help', 'environment');
     }
   }
   elsif ($op_mode eq 'list')
   {
     my $rm= $mRM->attach();
+
+    my $project_name= (@$pars) ? shift (@$pars) : $self->{project_name};
+
     print "project_name=[$project_name]\n";
     Redmine::CLI::show_issues ($rm, $project_name);
+  }
+  elsif ($op_mode eq 'show')
+  {
+    my $rm= $mRM->attach();
+    push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
+    foreach my $ticket_number (@$pars)
+    {
+      Redmine::CLI::show_issue ($rm, $ticket_number);
+      $self->{ticket_number}= $ticket_number;
+    }
+  }
+  elsif ($op_mode eq 'browse' || $op_mode eq 'display')
+  {
+    my $rm_cfg= $self->{_rm_cfg};
+    my $base_url= sprintf ("%s://%s/issues/", map { $rm_cfg->{$_} } qw(protocol host));
+
+    push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
+    foreach my $ticket_number (@$pars)
+    {
+      my $url= $base_url . $ticket_number;
+      system ('xdg-open', $url);
+    }
+  }
+  elsif ($op_mode eq 'parent')
+  {
+    my $rm= $mRM->attach();
+    my $ticket_number= (@$pars) ? shift (@$pars) : $self->{ticket_number};
+
+    print "ticket_number: $ticket_number\n";
+    my $issue= $rm->issue( $ticket_number );
+
+    if (defined ($issue) && exists ($issue->{issue}->{parent}))
+    {
+      print "issue: ", join (' ', sort keys %{$issue->{issue}}), "\n";
+      my $parent= $issue->{issue}->{parent};
+      print "parent issue: $parent ", Dumper ($parent);
+      my $parent_issue= $parent->{id};
+      $self->interpret ('show', [ $parent_issue ]);
+    }
+    else
+    {
+      print "no parent issue found for $ticket_number\n";
+    }
+  }
+
+=begin comment
+
+not needed?
+  elsif ($op_mode eq 'related')
+  {
+    my $rm= $mRM->attach();
+    my $ticket_number= (@$pars) ? shift (@$pars) : $self->{ticket_number};
+
+    print "ticket_number: $ticket_number\n";
+    my $issue= $rm->issue( $ticket_number, { include => 'relations,changesets' } );
+
+    if (defined ($issue))
+    {
+      print "issue: ", Dumper ($issue);
+    }
+  }
+
+=end comment
+=cut
+
+  return 1;
+}
+
+sub interact
+{
+  my $self= shift;
+
+  my $last_line;
+  LINE: while (1)
+  {
+    print "rcli> ";
+    my $l= <STDIN>;
+    last unless (defined ($l));
+    chop ($l);
+
+    if ($l eq '.') { $l= $last_line }
+    elsif ($l eq '') { next LINE; }
+    else { $last_line= $l }
+
+    my ($op, @pars)= split (' ', $l);
+    print "op=[$op]\n";
+    my $continue= interpret ($self, $op, \@pars);
+    last unless ($continue);
   }
 }
 
@@ -266,15 +458,64 @@ sub show_issue
   my $rm= shift;
   my $ticket_number= shift;
 
-  my $issues= $rm->issue( $ticket_number );
-  print "issues: ", Dumper ($issues);
+  my $issue= $rm->issue( $ticket_number, { include => 'children,attachments,relations,changesets,journals' } );
+  print "issue: ", Dumper ($issue);
+  $issue;
 }
 
 sub usage
 {
-  system ('perldoc', __FILE__);
-  exit (0);
+  my $type= shift || 'help';
+  my $message= shift || 'usage';
+
+  my $pod= new Pod::Simple::Text();
+  my $y= $pod->output_fh (*STDOUT);
+
+  # print "usage: type=[$type] message=[$message]\n";
+
+  my $was_error= 0;
+  while (1)
+  {
+    if ($type eq 'error')
+    {
+      $was_error= 1;
+      print "ERROR: ", $message, "\n\n";
+    }
+    elsif ($type eq 'help')
+    {
+      $message= 'overview' unless (exists ($HELP{$message}));
+      $pod->parse_string_document ($HELP{$message});
+    }
+
+    last unless (@_);
+  }
+
+  # system ('perldoc', __FILE__);
 }
 
 1;
+
+__END__
+
+=head1 TODOS
+
+=over 1
+
+=item There command line options need to be evolved
+
+=back
+
+=head1 AUTHOR
+
+Gerhard Gonter E<lt>ggonter@cpan.orgE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2016 by Gerhard Gonter
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
 
