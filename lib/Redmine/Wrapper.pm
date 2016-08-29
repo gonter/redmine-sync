@@ -10,6 +10,8 @@ my %automapping=
   'project_ids' => 1,
 );
 
+my %USER_NAMES= map { $_ => 1 } qw(assigned_to);
+
 sub new
 {
   my $class= shift;
@@ -57,6 +59,8 @@ sub get_mapped_id
 
   my $c= $self->{'cfg'};
   # print "cfg: ", main::Dumper ($c);
+
+  $map_name= 'user' if (exists ($USER_NAMES{$map_name}));
   my $m= $c->{$map_name.'_ids'};
 
   # print "map_name=[$map_name] name=[$name] m=", main::Dumper ($m);

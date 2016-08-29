@@ -64,6 +64,7 @@ EOPOD
 
   project_name
   ticket_number
+  out_csv
 
 =cut
 EOPOD
@@ -72,7 +73,7 @@ EOPOD
 my $default_config_fnm= 'redmine.json';
 my @default_home_dirs= ('etc', undef, 'bin');
 
-my @env_vars= qw(project_name ticket_number);
+my @env_vars= qw(project_name ticket_number out_csv);
 my %env_vars= map { $_ => 1 } @env_vars;
 
 sub new
@@ -100,7 +101,7 @@ sub new
     # print "NOTE: trying [$f] as config filen name\n";
     if (-f $f)
     {
-      # print "NOTE: picked [$f] as config filen name\n";
+      print "NOTE: picked [$f] as config filen name\n";
       $obj->{'cfg_fnm'}= $f;
       last;
     }
@@ -152,9 +153,8 @@ sub parse_args
       elsif ($opt eq 'config')   { $self->{cfg_fnm}=      $val || shift (@ARGV); }
       elsif ($opt eq 'stanza')   { $self->{cfg_stanza}=   $val || shift (@ARGV); }
       elsif ($opt eq 'project')  { $self->{project_name}= $val || shift (@ARGV); }
-      # elsif ($opt eq 'show') { $self->{op_mode}= 'show'; }
-      # elsif ($opt eq 'list') { $self->{op_mode}= 'list'; }
-      # TODO: allow extra arguments
+      elsif ($opt eq 'out')      { $self->{out_csv}=      $val || shift (@ARGV); }
+      # TODO: allow extra arguments for plugins or otherwise
       else { usage('error', "unknown option --${arg}"); exit(0); }
     }
     elsif ($arg =~ /^-(.+)/)
@@ -266,7 +266,7 @@ sub interpret
   {
     foreach my $an (@env_vars)
     {
-      printf ("%12s = '%s'\n", $an, $self->{$an});
+      printf ("%-15s = '%s'\n", $an, $self->{$an});
     }
   }
   elsif ($op_mode eq 'set')
@@ -289,7 +289,8 @@ sub interpret
     my $project_name= (@$pars) ? shift (@$pars) : $self->{project_name};
 
     print "project_name=[$project_name]\n";
-    Redmine::CLI::show_issues ($rm, $project_name);
+    my $out_csv= $self->{out_csv};
+    Redmine::CLI::show_issues ($rm, $project_name, $out_csv);
   }
   elsif ($op_mode eq 'show')
   {
@@ -385,6 +386,7 @@ sub show_issues
 {
   my $rm= shift;
   my $proj_name= shift;
+  my $save_as_tsv= shift;
 
   my $proj= $rm->project($proj_name);
   print "proj_name=[$proj_name] proj: ", Dumper ($proj);
@@ -432,6 +434,12 @@ sub show_issues
   $csv->sort ('subject', 0, 0);
 
   $csv->matrix_view (\@columns1);
+
+  if (defined ($save_as_tsv))
+  {
+    print "saving tsv file to '$save_as_tsv'\n";
+    $csv->save_csv_file (separator => "\t", filename => $save_as_tsv);
+  }
 }
 
 sub filter1
