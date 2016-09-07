@@ -12,7 +12,7 @@ my $show_query= 0;
 my $show_fetched= 0;
 
 sub show_fetched { shift; my $ret= $show_fetched; $show_fetched= shift; $ret; }
-sub show_query   { shift; my $ret= $show_query; $show_query= shift; $ret }
+sub show_query   { shift; my $ret= $show_query;   $show_query=   shift; $ret; }
 sub verbose      { shift; my @ret= ($show_fetched, $show_query); $show_fetched= $show_query= shift; @ret; }
 
 sub connect
