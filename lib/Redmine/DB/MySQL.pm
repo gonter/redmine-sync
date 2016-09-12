@@ -10,10 +10,12 @@ use Data::Dumper;
 
 my $show_query= 0;
 my $show_fetched= 0;
+my $show_updates= 0;
 
 sub show_fetched { shift; my $ret= $show_fetched; $show_fetched= shift; $ret; }
 sub show_query   { shift; my $ret= $show_query;   $show_query=   shift; $ret; }
-sub verbose      { shift; my @ret= ($show_fetched, $show_query); $show_fetched= $show_query= shift; @ret; }
+sub show_updates { shift; my $ret= $show_updates; $show_updates= shift; $ret; }
+sub verbose      { shift; my @ret= ($show_fetched, $show_query, $show_updates); $show_fetched= $show_query= $show_updates= shift; @ret; }
 
 sub connect
 {
@@ -90,6 +92,9 @@ sub get_all_x
   my $tt= {};
 
   my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : 'id';
+  # print __LINE__, " pri=[$pri] ", main::Dumper ($self->{PRI});
+  # print __LINE__, " pri=[$pri]\n";
+
   while (defined (my $x= $sth->fetchrow_hashref()))
   {
     print "x: ", Dumper ($x) if ($show_fetched);
@@ -270,9 +275,18 @@ sub update
   }
   push (@vals, $id);
 
-  my $ssu= "UPDATE `$table` SET ". join (', ', map { $_.'=?' } @vars) . ' WHERE id=?';
-  print "ssu=[$ssu]\n";
-  print "vals: ", join (',', @vals), "\n";
+  my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : 'id';
+  # print __LINE__, " pri=[$pri] ", main::Dumper ($self->{PRI});
+  # print __LINE__, " pri=[$pri]\n";
+
+  my $ssu= "UPDATE `$table` SET ". join (', ', map { $_.'=?' } @vars) . " WHERE `$pri`=?"; # Hmm... WHERE ?=?
+
+  if ($show_updates)
+  {
+    print "ssu=[$ssu]\n";
+    print "vals: ", join (',', @vals), "\n";
+  }
+
   my $sth= $dbh->prepare($ssu);
   $sth->execute(@vals);
   print "ERROR: ", $dbh->errstr() if ($dbh->err);
