@@ -86,7 +86,14 @@ sub get_all_x
 
   my $sth= $dbh->prepare($ss) or print $dbh->errstr;
   # print "sth=[$sth]\n";
-  $sth->execute(@v);
+  my $rc= $sth->execute(@v);
+  # print __LINE__, "rc=[$rc]\n";
+  unless (defined ($rc))
+  {
+    print __LINE__, " rc=[$rc] ", $dbh->errstr(), "\n";
+    print __LINE__, " caller: ", join (' ', caller()), "\n";
+    return undef;
+  }
 
   my $t= $self->table($table);
   my $tt= {};
@@ -240,7 +247,14 @@ sub insert
   print "ssi=[$ssi]\n";
   print "vals: ", join (',', @vals), "\n";
   my $sth= $dbh->prepare($ssi);
-  $sth->execute(@vals);
+  my $rc= $sth->execute(@vals);
+  unless (defined ($rc))
+  {
+    print __LINE__, " rc=[$rc] ", $dbh->errstr(), "\n";
+    print __LINE__, " caller: ", join (' ', caller()), "\n";
+    return undef;
+  }
+
   print "ERROR: ", $dbh->errstr() if ($dbh->err);
   $sth->finish();
 
@@ -288,8 +302,15 @@ sub update
   }
 
   my $sth= $dbh->prepare($ssu);
-  $sth->execute(@vals);
-  print "ERROR: ", $dbh->errstr() if ($dbh->err);
+  my $rc= $sth->execute(@vals);
+
+  unless (defined ($rc))
+  {
+    print __LINE__, " rc=[$rc] ", $dbh->errstr(), "\n";
+    print __LINE__, " caller: ", join (' ', caller()), "\n";
+    return undef;
+  }
+
   $sth->finish();
 }
 
