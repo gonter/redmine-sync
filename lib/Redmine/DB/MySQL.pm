@@ -73,8 +73,8 @@ sub get_all_x
   if (defined ($where))
   {
     # print "where: ", Dumper ($where) if ($show_query);
-    $ss .= ' WHERE ' . shift (@$where);
-    @v= @$where;
+    @v= @$where; # copy first!
+    $ss .= ' WHERE ' . shift (@v);
   }
 
   if ($show_query)
