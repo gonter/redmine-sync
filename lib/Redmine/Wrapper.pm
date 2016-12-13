@@ -5,9 +5,13 @@ use strict;
 
 use WebService::Redmine;
 
+sub get_project_info;
+sub get_tracker_map;
+
 my %automapping=
 (
-  'project_ids' => 1,
+  'project_ids' => { automap => 1, object => 'project', info => \&get_project_info },
+  'tracker_ids' => { automap => 1, object => 'tracker', map => \&get_tracker_map },
 );
 
 my %USER_NAMES= map { $_ => 1 } qw(assigned_to);
@@ -57,41 +61,73 @@ sub get_mapped_id
   my $map_name= shift;
   my $name= shift;
 
-  my $c= $self->{'cfg'};
-  # print "cfg: ", main::Dumper ($c);
+  my $cfg= $self->{'cfg'};
+  # print "cfg: ", main::Dumper ($cfg);
 
-  $map_name= 'user' if (exists ($USER_NAMES{$map_name}));
-  my $m= $c->{$map_name.'_ids'};
+  $map_name= 'user_ids' if (exists ($USER_NAMES{$map_name}));
+  my $m= $self->{$map_name};
+  if (!defined ($m) && exists ($cfg->{$map_name}))
+  {
+    $m= $self->{$map_name}= { %$m }; # copy from config
+  }
 
   # print "map_name=[$map_name] name=[$name] m=", main::Dumper ($m);
 
   my $id;
-  my $perform_lookup= 0;
+  my $perform_lookup= 1;
   if (exists ($m->{$name}))
   {
     $id= $m->{$name};
-    print "ATTN: no id known for $map_name=[$name]\n";
+    # print "ATTN: no id known for $map_name=[$name]\n";
 
-    if (exists ($self->{automapping}) && $self->{automapping} >= 1)
+=begin comment
+
+    if (exists ($cfg->{automapping}) && $cfg->{automapping} >= 1)
     { # TODO: add an *optional* lookup ...
       $perform_lookup= 1;
     }
+
+=end comment
+=cut
+
   }
   else
   {
-    print "ATTN: no *map* named [$map_name] available\n";
-    if (exists ($self->{automapping}) && $self->{automapping} >= 2 && exists ($automapping{$map_name}))
-    { # TODO: allow dynamically fetched maps, when the map name is valied, e.g. project_ids etc..
-      if ($name eq 'project')
-      {
-        my $pi= $self->get_project_info ($name);
-        $perform_lookup= 1 if (defined ($pi));
-      }
+    # print "ATTN: no *map* named [$map_name] available\n";
+
+=begin comment
+
+    if (exists ($cfg->{automapping}) && $cfg->{automapping} >= 2)
+    {
+      $perform_lookup= 1;
     }
+
+=end comment
+=cut
+
   }
 
   if (!defined ($id) && $perform_lookup)
   {
+    # print "map_name=[$map_name] id not found, perform_lookup=[$perform_lookup]\n";
+
+    if (exists ($automapping{$map_name}))
+    { # TODO: allow dynamically fetched maps, when the map name is valid, e.g. project_ids etc..
+      my $automap= $automapping{$map_name};
+      # print "NOTE: checking automap: ", main::Dumper ($automap);
+      if (defined (my $c_i= $automap->{info}))
+      {
+        my $pi= &$c_i ($self, $name);
+        # print "pi: ", main::Dumper ($pi);
+        $id= $pi->{id} if (defined ($pi));
+      }
+      elsif (defined (my $c_m= $automap->{map}))
+      {
+        my $map= &$c_m ($self);
+        # print "map: ", main::Dumper ($map);
+        $id= $map->{$name} if (defined ($map));
+      }
+    }
   }
 
   $id;
@@ -103,6 +139,25 @@ sub get_tracker_id
   my $tracker_name= shift;
 
   $self->get_mapped_id ('tracker_ids', $tracker_name);
+}
+
+# Note: for some reason, receiving info for one tracker is not possible
+sub get_tracker_map
+{
+  my $self= shift;
+
+  my $rm= $self->attach();
+  my $tracker_list= $rm->trackers();
+  # print __LINE__, " tracker_list: ", main::Dumper ($tracker_list);
+
+  my %trackers;
+  if (defined ($tracker_list))
+  {
+    %trackers= map { $_->{name} => $_->{id} } @{$tracker_list->{trackers}};
+    $self->{tracker_ids}= \%trackers;
+  }
+
+  \%trackers;
 }
 
 sub get_project_id
@@ -120,7 +175,11 @@ sub get_project_info
 
   my $rm= $self->attach();
   my $proj= $rm->project( $name );
-  print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
+
+  return undef unless (defined ($proj));
+
+  # print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
+  return $proj->{'project'};
 }
 
 sub fixup_issue

@@ -73,7 +73,7 @@ EOPOD
 my $default_config_fnm= 'redmine.json';
 my @default_home_dirs= ('etc', undef, 'bin');
 
-my @env_vars= qw(project_name ticket_number out_csv);
+my @env_vars= qw(project_name tracker_name ticket_number out_csv subject);
 my %env_vars= map { $_ => 1 } @env_vars;
 
 sub new
@@ -86,6 +86,7 @@ sub new
      'cfg_stanza'   => 'Redmine',
      'op_mode'      => undef,
      # 'project_name' => undef,
+     'tracker_name' => 'Task',
   };
 
   my @cfg_fnm= (
@@ -116,14 +117,14 @@ sub new
 
 sub set
 {
-  my $obj= shift;
+  my $self= shift;
   my %par= @_;
 
   my %res;
   foreach my $par (keys %par)
   {
-    $res{$par}= $obj->{$par};
-    $obj->{$par}= $par{$par};
+    $res{$par}= $self->{$par};
+    $self->{$par}= $par{$par};
   }
 
   (wantarray) ? %res : \%res;
@@ -205,6 +206,13 @@ sub init
   $self->{_rm_wrapper}= my $mRM= new Redmine::Wrapper ('cfg' => $rm_cfg);
 
   ($cfg, $mRM);
+}
+
+sub get_wrapper
+{
+  my $self= shift;
+
+  my $mRM= $self->{_rm_wrapper};
 }
 
 sub main_part2
@@ -335,6 +343,15 @@ sub interpret
       print "no parent issue found for $ticket_number\n";
     }
   }
+  elsif ($op_mode eq 'prepare')
+  {
+    my $project_name= $self->{project_name};
+    my $tracker_name= $self->{tracker_name};
+    my $subject= $self->{subject};
+    my $description;
+
+    my $t= prepare_ticket ($mRM, $project_name, $tracker_name, $subject, $description);
+  }
 
 =begin comment
 
@@ -382,12 +399,17 @@ sub interact
   }
 }
 
+=head1 methods belonging WebService::Redmine
+
+=cut
+
 sub show_issues
 {
   my $rm= shift;
   my $proj_name= shift;
   my $save_as_tsv= shift;
 
+  print "rm=[$rm]\n";
   my $proj= $rm->project($proj_name);
   print "proj_name=[$proj_name] proj: ", Dumper ($proj);
 
@@ -461,6 +483,47 @@ sub filter1
   (\@dx, \%dy);
 }
 
+=head1 methods belonging Redmine::Wrapper
+
+=cut
+
+sub prepare_ticket
+{
+  my $mRM= shift;
+  my $project_name= shift;
+  my $tracker_name= shift;
+  my $subject= shift;
+  my $description= shift;
+
+  my $rm= $mRM->attach();
+
+  # print "rm=[$rm]\n";
+
+  my $proj_id= $mRM->get_project_id($project_name);
+  # my $proj_id= $proj->{'project'}->{'id'};
+  print "project_name=[$project_name] proj_id=[$proj_id]\n";
+
+  my $tr_id= $mRM->get_tracker_id($tracker_name);
+  # print "tr: ", Dumper ($tr);
+  # my $tr_id= $tr->{'tracker'}->{'id'};
+  print "tracker_name=[Task] tr_id=[$tr_id]\n";
+
+  my $ticket=
+  {
+    issue => my $issue=
+    {
+      'project_id' => $proj_id,
+      'tracker_id' => $tr_id,
+      'subject' => $subject,
+      'description' => $description,
+    }
+  };
+
+  # print "ticket: ", Dumper ($ticket);
+
+  $ticket;
+}
+
 sub show_issue
 {
   my $rm= shift;
@@ -509,7 +572,7 @@ __END__
 
 =over 1
 
-=item There command line options need to be evolved
+=item The command line options need to be evolved
 
 =back
 
