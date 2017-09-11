@@ -20,3 +20,17 @@ use Redmine::CLI;
   $rm_cli->main_part2();
 
 exit;
+
+__END__
+
+=head1 Requirements
+
+=head2 WebService::Redmine
+
+ * git clone git@github.com:igelhaus/perl-WebService-Redmine.git
+
+=head1 TODOs
+
+ * check due dates for an "alarm-tool"
+ * show related issues, if possible with dependency graph
+
