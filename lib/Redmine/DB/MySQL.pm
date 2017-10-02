@@ -29,8 +29,20 @@ sub connect
 
   my $db_con= join (':', 'dbi', $adapter, map { $self->{$_} } qw(database host));
   # print "db_con=[$db_con]\n";
+
   $dbh= DBI->connect($db_con, map { $self->{$_} } qw(username password));
   # print "dbh=[$dbh]\n";
+
+  if (exists ($self->{encoding}))
+  {
+    if ($self->{encoding} eq 'utf8')
+    {
+      # print __FILE__, ' ', __LINE__, " NOTE: turning on utf8 mode in MySQL driver\n";
+      $dbh->{mysql_enable_utf8}= 1;
+      $dbh->do('set names utf8');
+    }
+  }
+
   $self->{'_dbh'}= $dbh;
 }
 
