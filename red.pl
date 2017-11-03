@@ -9,7 +9,7 @@ $Data::Dumper::Indent= 1;
 
 use Redmine::CLI;
 
-  my $rm_cli= new Redmine::CLI();
+  my $rm_cli= new Redmine::CLI(cfg_stanza => $ENV{'REDMINE'});
   # print __LINE__, " rm_cli: ", Dumper ($rm_cli);
 
   $rm_cli->parse_args(@ARGV);

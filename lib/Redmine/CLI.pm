@@ -1,4 +1,8 @@
 
+=head3 Environment variables
+
+  REDMINE ... specify stanza of selected Redmine instance
+
 =pod
 
 =head1 NAME
@@ -59,6 +63,10 @@ EOPOD
 
   'env' => <<EOPOD,
 =head2 Enivironment
+
+=head3 Environment variables
+
+  REDMINE ... specify stanza of selected Redmine instance
 
 =head3 default attributes
 
