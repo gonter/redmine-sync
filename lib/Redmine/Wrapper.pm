@@ -66,9 +66,13 @@ sub get_mapped_id
 
   $map_name= 'user_ids' if (exists ($USER_NAMES{$map_name}));
   my $m= $self->{$map_name};
+  print __LINE__, " get_mapped_id: map_name=[$map_name] m=[$m]\n";
   if (!defined ($m) && exists ($cfg->{$map_name}))
   {
-    $m= $self->{$map_name}= { %$m }; # copy from config
+    print __LINE__, ' get_mapped_id: cfg->{$map_name} ', main::Dumper ($cfg->{$map_name});
+
+    # $m= $self->{$map_name}= { %$m }; this can't be right! # copy from config
+    $m= $self->{$map_name}= { %{$cfg->{$map_name}} }; # copy from config
   }
 
   # print "map_name=[$map_name] name=[$name] m=", main::Dumper ($m);
@@ -163,9 +167,10 @@ sub get_tracker_map
 sub get_project_id
 {
   my $self= shift;
-  my $project_name= shift;
+  my $name= shift;
 
-  $self->get_mapped_id ('project_ids', $project_name);
+  print __LINE__, " get_project_id: name=[$name]\n";
+  $self->get_mapped_id ('project_ids', $name);
 }
 
 sub get_project_info
@@ -173,12 +178,14 @@ sub get_project_info
   my $self= shift;
   my $name= shift;
 
+  print __LINE__, " get_project_info: name=[$name]\n";
+
   my $rm= $self->attach();
   my $proj= $rm->project( $name );
 
   return undef unless (defined ($proj));
 
-  # print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
+  print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
   return $proj->{'project'};
 }
 
