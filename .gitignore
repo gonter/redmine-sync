@@ -1,4 +1,6 @@
 @*
 ts.*
+*.tsv
 typescript
 tmp/
+export/
