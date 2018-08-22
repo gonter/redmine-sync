@@ -160,6 +160,15 @@ sub get_tracker_map
   \%trackers;
 }
 
+sub get_projects
+{
+  my $self= shift;
+
+  my $rm= $self->attach();
+  my $project_list= $rm->projects();
+  print __LINE__, " project_list: ", main::Dumper ($project_list);
+}
+
 sub get_project_id
 {
   my $self= shift;
