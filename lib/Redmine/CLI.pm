@@ -72,7 +72,7 @@ EOPOD
 
   project_name
   ticket_number
-  out_csv
+  out_tsv
 
 =cut
 EOPOD
@@ -81,7 +81,10 @@ EOPOD
 my $default_config_fnm= 'redmine.json';
 my @default_home_dirs= ('etc', undef, 'bin');
 
-my @env_vars= qw(project_name tracker_name ticket_number out_csv subject);
+my @OS_env_vars= qw(REDMINE);
+my %OS_env_vars= map { $_ => 1 } @OS_env_vars;
+
+my @env_vars= qw(project_name tracker_name ticket_number out_tsv subject);
 my %env_vars= map { $_ => 1 } @env_vars;
 
 sub new
@@ -108,6 +111,7 @@ sub new
     my $f= shift (@cfg_fnm);
     next unless (defined ($f));
     # print "NOTE: trying [$f] as config filen name\n";
+
     if (-f $f)
     {
       print "NOTE: picked [$f] as config filen name\n";
@@ -162,7 +166,7 @@ sub parse_args
       elsif ($opt eq 'config')   { $self->{cfg_fnm}=      $val || shift (@ARGV); }
       elsif ($opt eq 'stanza')   { $self->{cfg_stanza}=   $val || shift (@ARGV); }
       elsif ($opt eq 'project')  { $self->{project_name}= $val || shift (@ARGV); }
-      elsif ($opt eq 'out')      { $self->{out_csv}=      $val || shift (@ARGV); }
+      elsif ($opt eq 'out')      { $self->{out_tsv}=      $val || shift (@ARGV); }
       # TODO: allow extra arguments for plugins or otherwise
       else { usage('error', "unknown option --${arg}"); exit(0); }
     }
@@ -199,6 +203,7 @@ sub init
   return undef unless (defined ($cfg));
 
   $self->{_rm_cfg}= my $rm_cfg= $cfg->{$self->{cfg_stanza}};
+  printf ("init: cfg_fnm=[%s] cfg_stanza=[%s]\n", map { $self->{$_} } qw(cfg_fnm cfg_stanza));
 
   # TODO: set defaults?
 
@@ -280,6 +285,13 @@ sub interpret
   }
   elsif ($op_mode eq 'env')
   {
+    print "OS:\n";
+    foreach my $an (@OS_env_vars)
+    {
+      printf ("%-15s = '%s'\n", $an, $ENV{$an});
+    }
+
+    print "app:\n";
     foreach my $an (@env_vars)
     {
       printf ("%-15s = '%s'\n", $an, $self->{$an});
@@ -289,14 +301,59 @@ sub interpret
   {
     my $an= shift (@$pars);
 
-    if (exists ($env_vars{$an}))
+    if (!defined ($an))
+    {
+      usage ('error', "no environment variable specified", 'help', 'env');
+    }
+    elsif (exists ($env_vars{$an}))
     {
       $self->{$an}= join (' ', @$pars);
     }
+    elsif (exists ($OS_env_vars{$an}))
+    {
+      $ENV{$an}= join (' ', @$pars);
+
+      if ($an eq 'REDMINE')
+      {
+        $self->set (cfg_stanza => $ENV{REDMINE});
+        $self->init();
+      }
+    }
     else
     {
-      usage ('error', "unknown environment variable '$an'", 'help', 'environment');
+      usage ('error', "unknown environment variable '$an'", 'help', 'env');
     }
+  }
+  elsif ($op_mode eq 'instances')
+  {
+    print "available instances: ", join (' ', keys %{$self->{_cfg}}), "\n";
+  }
+  elsif ($op_mode eq 'projects')
+  {
+    my $rm= $mRM->attach();
+    my $out_tsv= $self->{out_tsv};
+    my ($proj_list, $csv)= Redmine::CLI::show_projects ($rm, $out_tsv);
+    $self->{project_list}= $proj_list;
+  }
+  elsif ($op_mode eq 'wiki')
+  {
+    my $rm= $mRM->attach();
+    my $out_tsv= $self->{out_tsv};
+
+    my $project_name= (@$pars) ? shift (@$pars) : $self->{project_name};
+    my $page_name= (@$pars) ? shift (@$pars) : 'index';
+    Redmine::CLI::show_wiki_pages ($rm, $project_name, $page_name, $out_tsv);
+  }
+  elsif ($op_mode eq 'exportwiki')
+  {
+    my $rm= $mRM->attach();
+
+    my $project_name= (@$pars) ? shift (@$pars) : $self->{project_name};
+    Redmine::CLI::export_wiki ($rm, $project_name);
+  }
+  elsif ($op_mode eq 'self')
+  {
+    print "self: ", Dumper ($self);
   }
   elsif ($op_mode eq 'list')
   {
@@ -305,8 +362,8 @@ sub interpret
     my $project_name= (@$pars) ? shift (@$pars) : $self->{project_name};
 
     print "project_name=[$project_name]\n";
-    my $out_csv= $self->{out_csv};
-    Redmine::CLI::show_issues ($rm, $project_name, $out_csv);
+    my $out_tsv= $self->{out_tsv};
+    Redmine::CLI::show_issues ($rm, $project_name, $out_tsv);
   }
   elsif ($op_mode eq 'show')
   {
@@ -411,6 +468,65 @@ sub interact
 
 =cut
 
+sub export_wiki
+{
+  my $rm= shift;
+  my $proj_name= shift;
+  my $save_dir= shift || 'export/wiki'; # TODO: parametrize ...
+
+  my $exp= $rm->export_wiki($proj_name);
+  print "export_wiki: proj_name=[$proj_name] status=[$exp->{export_url}]\n";
+
+=begin comment
+
+Darn! the URL for a wiki export can not be retrieved with the API key
+
+  print "export_wiki: proj_name=[$proj_name] status=[$exp->{status}]\n";
+  # print "exp: ", Dumper ($exp);
+
+  if (defined ($save_dir) && -d $save_dir)
+  {
+    my $fnm_out= join ('/', $save_dir, $proj_name .'.html');
+    open (FO, '>:utf8', $fnm_out) or die "can't write to $fnm_out";
+    syswrite (FO, $exp->{content});
+    close (FO);
+  }
+
+=end comment
+=cut
+
+}
+
+sub show_wiki_pages
+{
+  my $rm= shift;
+  my $proj_name= shift;
+  my $page_name= shift;
+  my $save_as_tsv= shift;
+
+  print "rm=[$rm]\n";
+
+=begin comment
+
+  my $proj= $rm->project($proj_name);
+  print "proj_name=[$proj_name] proj: ", Dumper ($proj);
+
+  my $project_id= $proj->{'project'}->{'id'};
+  print "project_id=[$project_id]\n";
+
+=end comment
+=cut
+
+  my $offset= 0;
+
+    my @par= ($proj_name);
+    push (@par, $page_name) if (defined ($page_name));
+    push (@par, { offset => $offset } );
+
+    my $wiki= $rm->wiki(@par);
+    print "wiki: ", Dumper ($wiki);
+}
+
 sub show_issues
 {
   my $rm= shift;
@@ -470,6 +586,74 @@ sub show_issues
     print "saving tsv file to '$save_as_tsv'\n";
     $csv->save_csv_file (separator => "\t", filename => $save_as_tsv);
   }
+}
+
+sub show_projects
+{
+  my $rm= shift;
+  my $save_as_tsv= shift;
+
+  print "rm=[$rm]\n";
+
+  my (@data, @rows);
+  my $row_count= 0;
+  my @columns1= qw(id identifier name status created_on updated_on);
+  my @columns1_full= (@columns1, qw(parent_id parent_name));
+  print __LINE__, " columns1_full: ", Dumper (\@columns1_full);
+
+  my %projects_map= {};
+  my $offset= 0;
+  while (1)
+  {
+    my $projects= $rm->projects( { offset => $offset } );
+    # print "projects: ", Dumper ($projects);
+    my ($i_off, $i_tc, $i_lim)= map { $projects->{$_} } qw(offset total_count limit);
+    printf ("offset=%d total_count=%d limit=%d\n", $i_off, $i_tc, $i_lim);
+
+    foreach my $project (@{$projects->{'projects'}})
+    {
+      # print "project: ", Dumper ($project);
+      my ($rec_a, $rec_h)= filter1($project, \@columns1);
+
+      if (exists ($project->{parent}))
+      {
+        my $parent= $project->{parent};
+        push (@$rec_a, $rec_h->{parent_id}=   $parent->{id});
+        push (@$rec_a, $rec_h->{parent_name}= $parent->{name});
+      }
+
+      # print "rec_h: ", main::Dumper ($rec_h);
+      push (@rows, $rec_a);
+      push (@data, $rec_h);
+      $row_count++;
+
+      $projects_map{$rec_h->{identifier}}= $rec_h;
+    }
+
+    last if (($offset= $i_off + $i_lim) >= $i_tc);
+  }
+
+  my $csv= new Util::Simple_CSV ('UTF8' => 1, verbose => 1);
+  $csv->define_columns (@columns1_full);
+
+  # print "rows: ", Dumper (\@rows);
+
+  $csv->{rows}= \@rows;
+  $csv->{data}= \@data;
+  $csv->{row_count}= $row_count;
+  # print "csv: ", Dumper ($csv);
+  # $csv->sort ('id', 0, 1);
+  $csv->sort ('identifier', 0, 0);
+
+  $csv->matrix_view (\@columns1_full);
+
+  if (defined ($save_as_tsv))
+  {
+    print "saving tsv file to '$save_as_tsv'\n";
+    $csv->save_csv_file (separator => "\t", filename => $save_as_tsv);
+  }
+
+  (\%projects_map, $csv);
 }
 
 sub filter1
@@ -544,9 +728,6 @@ sub show_issue
 
 sub usage
 {
-  my $type= shift || 'help';
-  my $message= shift || 'usage';
-
   my $pod= new Pod::Simple::Text();
   my $y= $pod->output_fh (*STDOUT);
 
@@ -555,6 +736,9 @@ sub usage
   my $was_error= 0;
   while (1)
   {
+    my $type= shift || 'help';
+    my $message= shift || 'usage';
+
     if ($type eq 'error')
     {
       $was_error= 1;
