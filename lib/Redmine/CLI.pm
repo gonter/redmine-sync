@@ -56,8 +56,12 @@ EOPOD
 =head2 Overview
 
   help [topic] (this overview)
-  list
-  show ticket
+  list            ... list tickets in current project
+  show ticket     ... show ticket with this number
+  att ticket nr   ... download attachment nr <nr> from ticket <ticket>
+
+  instances ... list all instances
+  projects  ... list all projects
 =cut
 EOPOD
 
@@ -372,6 +376,17 @@ sub interpret
     foreach my $ticket_number (@$pars)
     {
       Redmine::CLI::show_issue ($rm, $ticket_number);
+      $self->{ticket_number}= $ticket_number;
+    }
+  }
+  elsif ($op_mode eq 'att')
+  {
+    my $rm= $mRM->attach();
+    push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
+    my $att_nr= $pars->[1];
+    foreach my $ticket_number (@$pars)
+    {
+      Redmine::CLI::download_attachment ($rm, $ticket_number, $att_nr);
       $self->{ticket_number}= $ticket_number;
     }
   }
@@ -724,6 +739,29 @@ sub show_issue
   my $issue= $rm->issue( $ticket_number, { include => 'children,attachments,relations,changesets,journals' } );
   print "issue: ", Dumper ($issue);
   $issue;
+}
+
+sub download_attachment
+{
+  my $rm= shift;
+  my $ticket_number= shift;
+  my $number= shift || 0;
+
+  my $ua= $rm->{ua};
+  return undef unless (defined ($ua));
+
+  my $issue= $rm->issue( $ticket_number, { include => 'attachments' } );
+  my $attachments= $issue->{issue}->{attachments};
+  # print "attachments: ", Dumper ($attachments);
+  return undef unless (defined ($attachments));
+
+  my $attachment= $attachments->[$number];
+  return undef unless (defined ($attachment));
+  print "attachment: ", Dumper ($attachment);
+
+  $ua->get($attachment->{content_url}, ':content_file' => $attachment->{filename});
+
+  $attachment;
 }
 
 sub usage
