@@ -281,6 +281,8 @@ sub interpret
     return undef;
   }
 
+  my @res;
+
      if ($op_mode eq 'help') { usage('help', (@$pars) ? shift (@$pars) : 'overview'); }
   elsif ($op_mode eq 'exit') { return 0; }
   elsif ($op_mode eq 'interact' || $op_mode eq 'i')
@@ -338,6 +340,7 @@ sub interpret
     my $out_tsv= $self->{out_tsv};
     my ($proj_list, $csv)= Redmine::CLI::show_projects ($rm, $out_tsv);
     $self->{project_list}= $proj_list;
+    push (@res, $proj_list);
   }
   elsif ($op_mode eq 'wiki')
   {
@@ -375,8 +378,9 @@ sub interpret
     push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
     foreach my $ticket_number (@$pars)
     {
-      Redmine::CLI::show_issue ($rm, $ticket_number);
+      my $issue= Redmine::CLI::show_issue ($rm, $ticket_number);
       $self->{ticket_number}= $ticket_number;
+      push (@res, $issue);
     }
   }
   elsif ($op_mode eq 'att')
@@ -453,7 +457,7 @@ not needed?
 =end comment
 =cut
 
-  return 1;
+  return (1, \@res);
 }
 
 sub interact
@@ -474,7 +478,7 @@ sub interact
 
     my ($op, @pars)= split (' ', $l);
     print "op=[$op]\n";
-    my $continue= interpret ($self, $op, \@pars);
+    my ($continue)= interpret ($self, $op, \@pars);
     last unless ($continue);
   }
 }
@@ -745,7 +749,7 @@ sub download_attachment
 {
   my $rm= shift;
   my $ticket_number= shift;
-  my $number= shift || 0;
+  my $number= shift;
 
   my $ua= $rm->{ua};
   return undef unless (defined ($ua));
@@ -755,13 +759,25 @@ sub download_attachment
   # print "attachments: ", Dumper ($attachments);
   return undef unless (defined ($attachments));
 
-  my $attachment= $attachments->[$number];
-  return undef unless (defined ($attachment));
-  print "attachment: ", Dumper ($attachment);
+  my @attachment_numbers;
+  if (!defined ($number) || $number eq '*') { push (@attachment_numbers, 0 .. $#$attachments); }
+  elsif ($number =~ /^\d+$/) { @attachment_numbers= $number; }
+  elsif ($number =~ /^\d[\d,-]*\d$/) { print "number ranges not yet implemented\n"; return undef; }
 
-  $ua->get($attachment->{content_url}, ':content_file' => $attachment->{filename});
+  print __LINE__, " attachment_numbers: ", join(' ', @attachment_numbers), "\n";
 
-  $attachment;
+  my @dl_attachments;
+  foreach my $num (@attachment_numbers)
+  {
+    my $attachment= $attachments->[$num];
+    next unless (defined ($attachment));
+    # print __LINE__, " attachment: ", Dumper ($attachment);
+    print __LINE__, " attachment num=[$num] ", $attachment->{filename}, "\n";
+    $ua->get($attachment->{content_url}, ':content_file' => $attachment->{filename});
+    push (@dl_attachments, $attachment);
+  }
+
+  return (wantarray) ? @dl_attachments : \@dl_attachments;
 }
 
 sub usage
