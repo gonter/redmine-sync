@@ -31,7 +31,8 @@ sub connect
   # print "db_con=[$db_con]\n";
 
   $dbh= DBI->connect($db_con, map { $self->{$_} } qw(username password));
-  # print "dbh=[$dbh]\n";
+  print join(' ', __FILE__, __LINE__, 'caller', caller(), "dbh=[$dbh]\n");
+  # exit;
 
   if (exists ($self->{encoding}))
   {
@@ -110,14 +111,14 @@ sub get_all_x
   my $t= $self->table($table);
   my $tt= {};
 
-  my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : 'id';
+  my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : ['id'];
   # print __LINE__, " pri=[$pri] ", main::Dumper ($self->{PRI});
-  # print __LINE__, " pri=[$pri]\n";
+  # print __LINE__, " table=[$table] pri=[$pri]\n";
 
   while (defined (my $x= $sth->fetchrow_hashref()))
   {
     print "x: ", Dumper ($x) if ($show_fetched);
-    my $i= $x->{$pri};
+    my $i= join(',', map { $x->{$_} } @$pri);
     $t->{$i}= $tt->{$i}= $x;
   }
 
@@ -224,6 +225,7 @@ sub desc
 
   # my @desc_columns= qw(Field Type Null Key Default Extra);
 
+  my @PRI;
   while (my @x= $sth->fetchrow_array())
   {
     last unless (@x);
@@ -232,9 +234,13 @@ sub desc
 
     if ($x[3] eq 'PRI')
     {
-      $self->{PRI}->{$table}= $x[0];
+      push (@PRI, $x[0]);
     }
   }
+
+  my $PRI= join(',', @PRI);
+  $self->{PRI}->{$table}= \@PRI;
+  # print join(' ', __FILE__, __LINE__, 'table:', $table, 'PRI:', $PRI), "\n";
 
   $td;
 }
@@ -299,13 +305,31 @@ sub update
     push (@vars, $an);
     push (@vals, $updates->{$an});
   }
-  push (@vals, $id);
 
   my $pri= (exists ($self->{PRI}->{$table})) ? $self->{PRI}->{$table} : 'id';
   # print __LINE__, " pri=[$pri] ", main::Dumper ($self->{PRI});
   # print __LINE__, " pri=[$pri]\n";
 
-  my $ssu= "UPDATE `$table` SET ". join (', ', map { $_.'=?' } @vars) . " WHERE `$pri`=?"; # Hmm... WHERE ?=?
+  # ATTN: $pri is a array ref with the column names forming the primary key; there can be more than one!!
+  # TODO: currently only the first variable name is used with a value!
+  print __LINE__, " caller: ", join(' ', caller()), "\n";
+
+  my @conditions;
+  if (ref($pri) eq 'ARRAY')
+  {
+    foreach my $attr_name (@$pri)
+    {
+      push (@conditions, "`$attr_name`=?");
+    }
+    push (@vals, @$id);
+  }
+  else
+  {
+    push (@conditions, "`$pri`=?");
+    push (@vals, $id);
+  }
+
+  my $ssu= "UPDATE `$table` SET ". join (', ', map { $_.'=?' } @vars) . " WHERE " . join (' AND ', @conditions); # Hmm... WHERE ?=?
 
   if ($show_updates)
   {
