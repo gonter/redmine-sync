@@ -17,7 +17,9 @@ use Redmine::CLI;
   my ($cfg, $mRM)= $rm_cli->init();
   # print __LINE__, " rm_cli: ", Dumper ($rm_cli);
 
-  $rm_cli->main_part2();
+  my $res= $rm_cli->main_part2();
+  print -_LINE__, " rm_cli: res: ", Dumper($res);
+  print __LINE__, " rm_cli: ", Dumper ($rm_cli);
 
 exit;
 
