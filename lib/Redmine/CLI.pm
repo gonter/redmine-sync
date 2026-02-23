@@ -21,6 +21,7 @@ use strict;
 
 use Data::Dumper;
 use Pod::Simple::Text;
+use JSON;
 use FileHandle;
 
 autoflush STDOUT 1;
@@ -82,26 +83,28 @@ EOPOD
 EOPOD
 );
 
+my $debug= 0;
 my $default_config_fnm= 'redmine.json';
 my @default_home_dirs= ('etc', undef, 'bin');
 
 my @OS_env_vars= qw(REDMINE);
 my %OS_env_vars= map { $_ => 1 } @OS_env_vars;
 
-my @env_vars= qw(project_name tracker_name ticket_number out_tsv subject);
+my @env_vars= qw(project_name tracker_name ticket_number subject parent out_format out_tsv);
 my %env_vars= map { $_ => 1 } @env_vars;
 
 sub new
 {
   my $class= shift;
 
-  my $obj=
+  my $self=
   {
      # defaults
      'cfg_stanza'   => 'Redmine',
      'op_mode'      => undef,
      # 'project_name' => undef,
      'tracker_name' => 'Task',
+     'out_format' => 'json',
   };
 
   my @cfg_fnm= (
@@ -118,17 +121,17 @@ sub new
 
     if (-f $f)
     {
-      print "NOTE: picked [$f] as config filen name\n";
-      $obj->{'cfg_fnm'}= $f;
+      print "NOTE: picked [$f] as config filen name\n" if ($debug);
+      $self->{'cfg_fnm'}= $f;
       last;
     }
   }
 
-  bless $obj, $class;
+  bless $self, $class;
 
-  $obj->set (@_);
+  $self->set (@_);
 
-  $obj;
+  $self;
 }
 
 sub set
@@ -161,7 +164,7 @@ sub parse_args
   {
     # print __LINE__, " arg=[$arg]\n";
 
-    if ($arg eq '--') { push (@PARS, @ARGV); @ARGV= (); }
+    if ($arg eq '--') { push (@extra_options, @ARGV); @ARGV= (); }
     elsif ($arg =~ /^--(.+)/)
     {
       my ($opt, $val)= split ('=', $1, $2);
@@ -171,16 +174,20 @@ sub parse_args
       elsif ($opt eq 'stanza')   { $self->{cfg_stanza}=   $val || shift (@ARGV); }
       elsif ($opt eq 'project')  { $self->{project_name}= $val || shift (@ARGV); }
       elsif ($opt eq 'out')      { $self->{out_tsv}=      $val || shift (@ARGV); }
+      elsif ($opt eq 'json')     { $self->{out_format}= 'json' }
+      elsif ($opt eq 'pretty')   { $self->{out_format}= 'pretty' }
       # TODO: allow extra arguments for plugins or otherwise
-      else { usage('error', "unknown option --${arg}"); exit(0); }
+      else { push (@extra_options, $arg); }
     }
     elsif ($arg =~ /^-(.+)/)
     {
       foreach my $opt (split ('', $1))
       {
-        if ($opt eq 'h') { usage('help', 'usage'); exit (0); exit(0); }
-        # elsif ($opt eq 'x') { $x_flag= 1; }
-        else { usage('error', "unknown option -{$arg}"); }
+        if ($opt eq 'h')    { usage('help', 'usage'); exit (0); exit(0); }
+        elsif ($opt eq 'J') { $self->{out_format}= 'json'; }
+        elsif ($opt eq 'P') { $self->{out_format}= 'pretty'; }
+        # TODO: allow extra arguments for plugins or otherwise
+        else { push (@extra_options, '-'.$opt); }
       }
     }
     else
@@ -191,9 +198,10 @@ sub parse_args
 
   unless (defined ($self->{op_mode}))
   {
-    $self->{op_mode}= (@PARS) ? shift (@PARS) : 'help';
+    $self->{op_mode}= (@PARS) ? shift (@PARS) : 'interact';
   }
 
+  $self->{extra_options}= \@extra_options if (@extra_options);
   $self->{_pars}= \@PARS;
 
   1;
@@ -203,11 +211,11 @@ sub init
 {
   my $self= shift;
 
-  $self->{_cfg}=    my $cfg=    Util::JSON::read_json_file ($self->{cfg_fnm});
+  $self->{_cfg}= my $cfg= Util::JSON::read_json_file ($self->{cfg_fnm});
   return undef unless (defined ($cfg));
 
   $self->{_rm_cfg}= my $rm_cfg= $cfg->{$self->{cfg_stanza}};
-  printf ("init: cfg_fnm=[%s] cfg_stanza=[%s]\n", map { $self->{$_} } qw(cfg_fnm cfg_stanza));
+  printf ("init: cfg_fnm=[%s] cfg_stanza=[%s]\n", map { $self->{$_} } qw(cfg_fnm cfg_stanza)) if ($debug);
 
   # TODO: set defaults?
 
@@ -220,7 +228,7 @@ sub init
     }
   }
 
-  $self->{_rm_wrapper}= my $mRM= new Redmine::Wrapper ('cfg' => $rm_cfg);
+  $self->{_rm_wrapper}= my $mRM= Redmine::Wrapper->new(cfg => $rm_cfg);
 
   ($cfg, $mRM);
 }
@@ -246,7 +254,7 @@ sub main_part2
 
   # print __LINE__, " mRM: ", Dumper ($mRM);
 
-  my $project_name= $self->{'project_name'} || $rm_cfg->{'project_name'};
+  my $project_name= $self->{project_name} || $rm_cfg->{project_name};
   unless (defined ($project_name))
   { # TODO: look up project id in Redmine itself
     print "ATTN: no project name found in configuration!\n";
@@ -372,25 +380,26 @@ sub interpret
     my $out_tsv= $self->{out_tsv};
     Redmine::CLI::show_issues ($rm, $project_name, $out_tsv);
   }
-  elsif ($op_mode eq 'show')
+  elsif ($op_mode eq 'show' || $op_mode eq 'process')
   {
     my $rm= $mRM->attach();
     push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
     foreach my $ticket_number (@$pars)
     {
-      my $issue= Redmine::CLI::show_issue ($rm, $ticket_number);
+      $ticket_number =~ s/^#//;
+      my $issue= $self->show_issue($rm, $ticket_number);
       $self->{ticket_number}= $ticket_number;
       push (@res, $issue);
     }
   }
-  elsif ($op_mode eq 'att')
+  elsif ($op_mode eq 'att' || $op_mode eq 'attachment')
   {
     my $rm= $mRM->attach();
     push (@$pars, $self->{ticket_number}) if (!@$pars && exists ($self->{ticket_number}));
     my $att_nr= $pars->[1];
     foreach my $ticket_number (@$pars)
     {
-      Redmine::CLI::download_attachment ($rm, $ticket_number, $att_nr);
+      Redmine::CLI::download_attachments ($rm, $ticket_number, $att_nr);
       $self->{ticket_number}= $ticket_number;
     }
   }
@@ -435,6 +444,7 @@ sub interpret
     my $description;
 
     my $t= prepare_ticket ($mRM, $project_name, $tracker_name, $subject, $description);
+    # TODO: nothing happens after that
   }
 
 =begin comment
@@ -472,18 +482,29 @@ sub interact
     last unless (defined ($l));
     chop ($l);
 
-    if ($l eq '.') { $l= $last_line }
-    elsif ($l eq '') { next LINE; }
+       if ($l eq '.') { $l= $last_line }
+    elsif ($l eq '')  { next LINE; }
     else { $last_line= $l }
 
-    my ($op, @pars)= split (' ', $l);
-    print "op=[$op]\n";
+    my ($op, @pars);
+
+    if ($l =~ /^#?(\d+)$/)
+    {
+      ($op, @pars)= ('show', $1);
+    }
+    else
+    {
+      ($op, @pars)= split (' ', $l);
+    }
+    # print "op=[$op]\n";
+
+I:
     my ($continue)= interpret ($self, $op, \@pars);
     last unless ($continue);
   }
 }
 
-=head1 methods belonging WebService::Redmine
+=head1 methods belonging to WebService::Redmine
 
 =cut
 
@@ -584,7 +605,7 @@ sub show_issues
     last if (($offset= $i_off + $i_lim) >= $i_tc);
   }
 
-  my $csv= new Util::Simple_CSV ('UTF8' => 1, verbose => 1);
+  my $csv= Util::Simple_CSV->new('UTF8' => 1, verbose => 1);
   $csv->define_columns (@columns1);
 
   # print "rows: ", Dumper (\@rows);
@@ -652,7 +673,7 @@ sub show_projects
     last if (($offset= $i_off + $i_lim) >= $i_tc);
   }
 
-  my $csv= new Util::Simple_CSV ('UTF8' => 1, verbose => 1);
+  my $csv= Util::Simple_CSV->new('UTF8' => 1, verbose => 1);
   $csv->define_columns (@columns1_full);
 
   # print "rows: ", Dumper (\@rows);
@@ -737,15 +758,130 @@ sub prepare_ticket
 
 sub show_issue
 {
+  my $self= shift;
   my $rm= shift;
   my $ticket_number= shift;
 
   my $issue= $rm->issue( $ticket_number, { include => 'children,attachments,relations,changesets,journals' } );
-  print "issue: ", Dumper ($issue);
+
+     if ($self->{out_format} eq 'dumper') { print "issue: ", Dumper($issue) }
+  elsif ($self->{out_format} eq 'json')   { print encode_json($issue), "\n" }
+  elsif ($self->{out_format} eq 'pretty') { pretty_show_ticket($issue) }
+  elsif ($self->{out_format} eq 'none') {}
+  else {} # TODO: complain?
+
   $issue;
 }
 
-sub download_attachment
+sub pretty_show_ticket
+{
+  my $issue= shift;
+
+  return undef unless (defined ($issue));
+
+  print '-'x70, "\n";
+  my $i= $issue->{issue};
+  return undef unless (defined ($i));
+
+  my @show_self= qw(id subject description custom_fields parent tracker journals attachments changesets children);
+  my @show_name= qw(project status priority author assigned_to);
+  my @show_attr1= qw(created_on updated_on closed_on done_ratio spent_hours);
+  my @show_attr2= qw(start_date due_date);
+
+  if (1)
+  {
+    my %skip= map { $_ => 1 } (@show_self, @show_name, @show_attr1, @show_attr2);
+    my @k= keys %$i;
+    my $lines= 0;
+    foreach my $an (@k)
+    {
+      next if (exists($skip{$an}));
+      print $an, ': ', Dumper($i->{$an});
+      $lines++;
+    }
+    print '-'x70, "\n" if ($lines);
+  }
+
+  my @changesets= @{$i->{changesets}};
+  my @attachments= @{$i->{attachments}};
+  my @journals= @{$i->{journals}};
+  my @children;
+  @children= @{$i->{children}} if (exists ($i->{children}));
+
+  print $i->{tracker}->{name}, " #", $i->{id}, ' ', $i->{subject}, "\n";
+  print 'attachments: ', scalar @attachments, ' journals: ', scalar @journals, ' changesets: ', scalar @changesets, "\n";
+  if (exists ($i->{parent}))
+  {
+    print 'parent: ', $i->{parent}->{id}, "\n";
+  }
+  if (@children)
+  {
+    print "children:\n";
+    foreach my $child (@children)
+    {
+      print '* ', $child->{tracker}->{name}, ' #', $child->{id}, ' ', $child->{subject}, "\n";
+    }
+  }
+
+  _name($i, @show_name);
+  _attr($i, @show_attr1);
+  _attr($i, @show_attr2);
+
+  foreach my $cf (@{$i->{custom_fields}})
+  {
+    my $v= $cf->{value};
+    next unless ($v);
+    print $cf->{name}, ': ', $v, "\n";
+  }
+
+  print "\nDescription\n", $i->{description}, "\n";
+
+  if (@attachments)
+  {
+    print '-'x70, "\n";
+    print "Attachments:\n";
+    my $i= 0; # display first ticket as nr. 0 to keep it consistent with download_attachments()
+    foreach my $a (@attachments)
+    {
+      print $i++, ': ', $a->{content_type}, ' ', $a->{filename};
+      print ' ', $a->{description};
+      print "\n";
+    }
+  }
+  print '-'x70, "\n";
+}
+
+sub _name
+{
+  my $x= shift;
+
+  my $c= 0;
+  foreach my $n (@_)
+  {
+    next unless exists ($x->{$n});
+    # my $l= uc($n);
+    print ' ', if ($c++);
+    print $n, ': ', $x->{$n}->{name}, ';';
+  }
+  print "\n" if ($c);
+}
+
+sub _attr
+{
+  my $x= shift;
+
+  my $c= 0;
+  foreach my $n (@_)
+  {
+    next unless exists ($x->{$n});
+    # my $l= uc($n);
+    print ' ', if ($c++);
+    print $n, ': ', $x->{$n}, ';';
+  }
+  print "\n" if ($c);
+}
+
+sub download_attachments
 {
   my $rm= shift;
   my $ticket_number= shift;
@@ -782,7 +918,7 @@ sub download_attachment
 
 sub usage
 {
-  my $pod= new Pod::Simple::Text();
+  my $pod= Pod::Simple::Text->new();
   my $y= $pod->output_fh (*STDOUT);
 
   # print "usage: type=[$type] message=[$message]\n";
