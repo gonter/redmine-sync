@@ -179,7 +179,7 @@ sub get_project_id
   my $name= shift;
 
   print __LINE__, " get_project_id: name=[$name]\n";
-  $self->get_mapped_id ('project_ids', $name);
+  $self->get_mapped_id (project_ids => $name);
 }
 
 sub get_project_info
@@ -195,7 +195,7 @@ sub get_project_info
   return undef unless (defined ($proj));
 
   print __LINE__, " get_project_info: name=[$name] proj: ", main::Dumper ($proj);
-  return $proj->{'project'};
+  return $proj->{project};
 }
 
 sub fixup_issue
@@ -208,7 +208,7 @@ sub fixup_issue
   {
     if ($cf_name eq 'custom_fields')
     {
-      transcribe_custom_fields ($self->{'cfg'}->{'custom_field_ids'}, $issue, $par->{'custom_fields'});
+      transcribe_custom_fields ($self->{cfg}->{custom_field_ids}, $issue, $par->{custom_fields});
     }
   }
 }
